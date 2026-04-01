@@ -1,0 +1,48 @@
+# =============================================================================
+# Context Cloak — AWS Infrastructure Example Variables
+# Copy to terraform.tfvars and update for your environment.
+# =============================================================================
+
+aws_region        = "us-east-1"
+availability_zone = "us-east-1a"
+name_prefix       = "context-cloak"
+
+# --- VPC ---
+vpc_cidr             = "10.0.0.0/16"
+mgmt_subnet_cidr     = "10.0.0.0/24"
+external_subnet_cidr = "10.0.1.0/24"
+internal_subnet_cidr = "10.0.2.0/24"
+
+# --- BIG-IP Instance ---
+bigip_instance_type = "m5.xlarge"
+
+# BYOL AMI filter — must accept the AWS Marketplace offer first:
+# https://aws.amazon.com/marketplace/pp/prodview-73utu5c5sfyyc
+bigip_ami_name_filter = "F5 BIGIP-17.1*BYOL-All Modules 2Boot*"
+
+bigip_hostname             = "bigip-lab.context-cloak.local"
+bigip_mgmt_private_ip      = "10.0.0.200"
+bigip_external_private_ip  = "10.0.1.200"
+bigip_internal_private_ip  = "10.0.2.200"
+
+# Secondary IPs on external interface become VIP addresses
+# [0] = MCP VS VIP,  [1] = Inference VS VIP
+bigip_external_secondary_ips = ["10.0.1.100", "10.0.1.101"]
+
+# --- BYOL License ---
+# Your F5 registration key
+bigip_license_key = "XXXXX-XXXXX-XXXXX-XXXXX-XXXXXXX"
+
+# --- Access ---
+admin_password = "CHANGE_ME_STRONG_PASSWORD"
+
+# Restrict management access to your IP
+allowed_mgmt_cidrs = ["0.0.0.0/0"]   # TODO: Restrict to your IP, e.g. ["203.0.113.5/32"]
+
+# Leave empty to auto-generate a key pair (private key in terraform output)
+ssh_public_key = ""
+
+# --- Runtime Init Versions ---
+f5_runtime_init_version = "2.0.3"
+do_version              = "1.44.0"
+as3_version             = "3.53.0"

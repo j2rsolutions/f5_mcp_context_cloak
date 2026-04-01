@@ -13,7 +13,7 @@ The architecture uses:
 | Component | Role | Provided By |
 |---|---|---|
 | **Open WebUI** | Chat UI and MCP orchestration | Pre-existing |
-| **BIG-IP TMOS v21** | MCP session routing + PII anonymization | This repo (Terraform + iRules) |
+| **BIG-IP TMOS v21** | MCP session routing + PII anonymization | This repo (Terraform + iRules) — deploy to AWS or configure existing |
 | **MCP Server** | Exposes customer data tools via JSON-RPC 2.0 | This repo (Python + Kubernetes) |
 | **Postgres** | Customer and financial data backend | This repo (Kubernetes) |
 | **vLLM** | LLM inference endpoint | Pre-existing |
@@ -93,13 +93,14 @@ The session ID portion ensures uniqueness across concurrent requests. The sequen
 - Kubernetes cluster (RKE2) with storage and networking
 - Open WebUI instance configured with MCP support
 - vLLM inference endpoint
-- BIG-IP TMOS v21 appliance with management access
+- **Either:** an existing BIG-IP TMOS v21 appliance, **or** an AWS account + F5 BYOL license key
 - Network connectivity between all components
 
 ### This repo deploys
 - MCP server (Python) on Kubernetes
 - Postgres database on Kubernetes
-- BIG-IP configuration via Terraform (virtual servers, pools, profiles, iRules)
+- **Option A — AWS:** Full BIG-IP VE infrastructure on AWS (VPC, 3-NIC EC2, security groups, EIPs) via `terraform/aws-infra/`
+- **Option B — Existing BIG-IP:** Configuration only (virtual servers, pools, profiles, iRules) via `terraform/bigip/`
 - Sample customer data for testing
 
 ## Limitations & Security Caveats
@@ -131,15 +132,43 @@ make mcp-server
 
 # 4. Deploy to Kubernetes
 kubectl apply -k kubernetes/overlays/lab/
+```
 
-# 5. Deploy BIG-IP config
-cd terraform/bigip
+### Option A: Deploy BIG-IP on AWS (BYOL)
+
+```bash
+cd terraform/aws-infra
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your BIG-IP details
+# Edit terraform.tfvars — set your BYOL license key, admin password, mgmt CIDRs
+terraform init
+terraform plan
+terraform apply
+
+# Note the outputs — bigip_mgmt_url, bigip_vip_public_ips, etc.
+# Wait ~10 minutes for BIG-IP to finish onboarding (runtime-init + DO licensing)
+
+# Then configure the BIG-IP with VS, pools, iRules:
+cd ../bigip
+cp terraform.tfvars.example terraform.tfvars
+# Set bigip_mgmt_host to the mgmt EIP from aws-infra output
+# Set mcp_vs_ip / vllm_vs_ip to the secondary IPs from aws-infra output
 terraform init
 terraform plan
 terraform apply
 ```
+
+### Option B: Configure an existing BIG-IP
+
+```bash
+cd terraform/bigip
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your BIG-IP management IP and pool member addresses
+terraform init
+terraform plan
+terraform apply
+```
+
+> **AWS prerequisite:** You must accept the [F5 BIG-IP BYOL Marketplace offer](https://aws.amazon.com/marketplace/pp/prodview-73utu5c5sfyyc) before Terraform can launch the AMI.
 
 ## Repository Structure
 
@@ -154,7 +183,9 @@ terraform apply
 │   ├── src/               # Python MCP server source
 │   └── sql/               # Schema and seed data
 ├── scripts/               # Bootstrap and helper scripts
-└── terraform/bigip/       # BIG-IP Terraform configuration
+└── terraform/
+    ├── aws-infra/         # AWS VPC + BIG-IP VE instance (BYOL)
+    └── bigip/             # BIG-IP application config (VS, pools, iRules)
 ```
 
 ## References

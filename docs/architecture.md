@@ -126,6 +126,56 @@ graph TB
     INF_VIP --> VLLM
 ```
 
+## AWS Deployment (BYOL)
+
+When deploying BIG-IP on AWS using `terraform/aws-infra/`, the network topology maps to:
+
+```mermaid
+graph TB
+    subgraph AWS us-east-1
+        subgraph "VPC 10.0.0.0/16"
+            subgraph "Management Subnet 10.0.0.0/24"
+                MGMT_ENI["eth0 — Management<br/>10.0.0.200<br/>EIP: public"]
+            end
+            subgraph "External Subnet 10.0.1.0/24"
+                EXT_ENI["eth1 — External<br/>Self: 10.0.1.200 (EIP)<br/>VIP: 10.0.1.100 (EIP) → MCP VS<br/>VIP: 10.0.1.101 (EIP) → Inference VS"]
+            end
+            subgraph "Internal Subnet 10.0.2.0/24"
+                INT_ENI["eth2 — Internal<br/>10.0.2.200<br/>→ Pool members"]
+            end
+        end
+        BIGIP["BIG-IP VE (m5.xlarge)<br/>BYOL Licensed<br/>3-NIC"]
+        BIGIP --- MGMT_ENI
+        BIGIP --- EXT_ENI
+        BIGIP --- INT_ENI
+
+        IGW[Internet Gateway]
+        IGW --- EXT_ENI
+        IGW --- MGMT_ENI
+    end
+
+    Admin([Admin]) -->|SSH/HTTPS| MGMT_ENI
+    Client([Open WebUI]) -->|VIP EIPs| EXT_ENI
+    INT_ENI -->|Pool traffic| K8s[Kubernetes Cluster]
+    INT_ENI -->|Pool traffic| vLLM[vLLM Endpoint]
+```
+
+### Deployment workflow
+
+1. `terraform/aws-infra/` creates the VPC, subnets, security groups, ENIs, EIPs, IAM role, Secrets Manager secret, and BIG-IP EC2 instance
+2. BIG-IP boots with `f5-bigip-runtime-init` user_data, which installs DO and AS3, then applies Declarative Onboarding (BYOL license, VLANs, self IPs, provisioning)
+3. After onboarding completes (~10 min), `terraform/bigip/` configures application objects (virtual servers, pools, iRules) using the management EIP
+
+### Key resources
+
+| Resource | Purpose |
+|---|---|
+| VPC + 3 subnets | Isolated network for mgmt, external, internal |
+| 3 ENIs | One per BIG-IP interface with appropriate security groups |
+| 4 EIPs | Management, external self, MCP VIP, Inference VIP |
+| IAM role + policy | Allows BIG-IP to read admin password from Secrets Manager |
+| Secrets Manager | Stores admin password securely |
+
 ## Trust Boundaries
 
 | Zone | Components | Sees PII? |
