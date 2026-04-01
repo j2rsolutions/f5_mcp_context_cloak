@@ -18,7 +18,7 @@ bigip_instance_type = "m5.xlarge"
 
 # BYOL AMI filter — must accept the AWS Marketplace offer first:
 # https://aws.amazon.com/marketplace/pp/prodview-73utu5c5sfyyc
-bigip_ami_name_filter = "F5 BIGIP-17.1*BYOL-All Modules 2Boot*"
+bigip_ami_name_filter = "F5 BIGIP-21*BYOL-All Modules 2Boot*"
 
 bigip_hostname             = "bigip-lab.context-cloak.local"
 bigip_mgmt_private_ip      = "10.0.0.200"

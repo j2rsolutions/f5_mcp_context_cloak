@@ -61,7 +61,7 @@ variable "bigip_instance_type" {
 variable "bigip_ami_name_filter" {
   description = "AMI name filter for BIG-IP BYOL image"
   type        = string
-  default     = "F5 BIGIP-17.1*BYOL-All Modules 2Boot*"
+  default     = "F5 BIGIP-21*BYOL-All Modules 2Boot*"
 }
 
 variable "bigip_mgmt_private_ip" {

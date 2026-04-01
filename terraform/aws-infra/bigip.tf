@@ -175,10 +175,9 @@ resource "aws_instance" "bigip" {
 
   iam_instance_profile = aws_iam_instance_profile.bigip.name
 
-  # eth0 = management (primary interface must be attached at launch)
-  network_interface {
+  # eth0 = management (primary interface attached at launch)
+  primary_network_interface {
     network_interface_id = aws_network_interface.mgmt.id
-    device_index         = 0
   }
 
   user_data = templatefile("${path.module}/templates/user_data.tpl", {

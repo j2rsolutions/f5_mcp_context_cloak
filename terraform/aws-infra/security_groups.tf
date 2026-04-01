@@ -1,5 +1,5 @@
 # =============================================================================
-# Security Groups — one per BIG-IP interface
+# Security Groups - one per BIG-IP interface
 # =============================================================================
 
 # --- Management ---
@@ -60,7 +60,7 @@ resource "aws_vpc_security_group_egress_rule" "mgmt_all" {
 # --- External (client-facing) ---
 resource "aws_security_group" "external" {
   name_prefix = "${var.name_prefix}-external-"
-  description = "BIG-IP external interface — virtual server traffic"
+  description = "BIG-IP external interface - virtual server traffic"
   vpc_id      = aws_vpc.this.id
 
   tags = {
@@ -100,7 +100,7 @@ resource "aws_vpc_security_group_egress_rule" "external_all" {
 # --- Internal (server-facing) ---
 resource "aws_security_group" "internal" {
   name_prefix = "${var.name_prefix}-internal-"
-  description = "BIG-IP internal interface — pool member traffic"
+  description = "BIG-IP internal interface - pool member traffic"
   vpc_id      = aws_vpc.this.id
 
   tags = {
