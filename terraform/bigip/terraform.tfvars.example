@@ -1,0 +1,56 @@
+# =============================================================================
+# Context Cloak — Example Terraform Variables
+# Copy this to terraform.tfvars and update for your environment.
+# =============================================================================
+
+# BIG-IP management access
+bigip_mgmt_host = "192.168.1.245"
+bigip_mgmt_port = 443
+bigip_username  = "admin"
+bigip_password  = "CHANGE_ME"
+
+# Partition (Common is the default; use a dedicated partition if preferred)
+partition = "Common"
+
+# ---------- MCP Virtual Server ----------
+
+mcp_vs_name = "mcp_vs"
+mcp_vs_ip   = "10.0.10.100"
+mcp_vs_port = 443
+mcp_vs_snat = "automap"
+# mcp_vs_vlan = "client_vlan"
+
+# MCP server pool members (Kubernetes NodePort or pod IPs)
+# TODO: Update these to match your MCP server service endpoints
+mcp_pool_members = [
+  { address = "10.0.20.10", port = 8080 },
+  { address = "10.0.20.11", port = 8080 },
+]
+
+# ---------- vLLM Inference Virtual Server ----------
+
+vllm_vs_name = "vllm_inference_vs"
+vllm_vs_ip   = "10.0.10.101"
+vllm_vs_port = 443
+vllm_vs_snat = "automap"
+# vllm_vs_vlan = "client_vlan"
+
+# vLLM pool members
+# TODO: Update to your vLLM endpoint(s)
+vllm_pool_members = [
+  { address = "10.0.30.10", port = 8000 },
+]
+
+# ---------- Profiles ----------
+
+http_profile_name = "http"
+ssl_client_profile = ""   # Set to your client SSL profile name to enable TLS termination
+
+# JSON and SSE profile sizing (bytes)
+json_profile_max_bytes = 131072   # 128KB — increase if MCP payloads are large
+sse_profile_max_bytes  = 131072   # 128KB
+
+# ---------- iRule paths ----------
+# Relative to terraform/bigip/ directory
+mcp_irule_path  = "../../irules/mcp_session_persistence.tcl"
+vllm_irule_path = "../../irules/vllm_anonymization.tcl"

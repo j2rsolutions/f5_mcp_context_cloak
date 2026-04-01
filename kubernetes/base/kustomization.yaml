@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: context-cloak
+
+resources:
+  - namespace.yaml
+  # Postgres
+  - postgres/secret.yaml
+  - postgres/configmap.yaml
+  - postgres/pvc.yaml
+  - postgres/deployment.yaml
+  - postgres/service.yaml
+  # MCP Server
+  - mcp-server/secret.yaml
+  - mcp-server/configmap.yaml
+  - mcp-server/deployment.yaml
+  - mcp-server/service.yaml
+  # Seed Job
+  - seed-job.yaml
+  # Network Policies
+  - network-policies.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: context-cloak

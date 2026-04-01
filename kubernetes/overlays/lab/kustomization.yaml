@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/mcp-server-replicas.yaml
+
+# Lab-specific image override if needed
+# images:
+#   - name: context-cloak-mcp-server
+#     newName: registry.lab.local/context-cloak-mcp-server
+#     newTag: latest

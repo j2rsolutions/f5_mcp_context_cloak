@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-server-config
+  namespace: context-cloak
+data:
+  POSTGRES_HOST: postgres.context-cloak.svc.cluster.local
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: context_cloak
+  POSTGRES_USER: mcpuser
+  MCP_SERVER_HOST: "0.0.0.0"
+  MCP_SERVER_PORT: "8080"

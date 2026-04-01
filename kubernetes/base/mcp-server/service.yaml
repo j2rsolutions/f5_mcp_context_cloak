@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-server
+  namespace: context-cloak
+  labels:
+    app: mcp-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: mcp
+  selector:
+    app: mcp-server

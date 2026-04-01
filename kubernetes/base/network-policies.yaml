@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-access
+  namespace: context-cloak
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only allow MCP server pods and seed jobs to connect to Postgres
+    - from:
+        - podSelector:
+            matchLabels:
+              app: mcp-server
+        - podSelector:
+            matchLabels:
+              app: db-seed
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-server-access
+  namespace: context-cloak
+spec:
+  podSelector:
+    matchLabels:
+      app: mcp-server
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow inbound traffic on port 8080 from any source
+    # In production, restrict to BIG-IP source IPs or a dedicated ingress namespace
+    - ports:
+        - protocol: TCP
+          port: 8080
+      # TODO: Restrict source. Example:
+      # from:
+      #   - ipBlock:
+      #       cidr: 10.0.10.0/24   # BIG-IP server-side VLAN

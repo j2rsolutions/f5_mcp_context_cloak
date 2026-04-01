@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-server
+  namespace: context-cloak
+  labels:
+    app: mcp-server
+    app.kubernetes.io/part-of: context-cloak
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-server
+  template:
+    metadata:
+      labels:
+        app: mcp-server
+    spec:
+      containers:
+        - name: mcp-server
+          # TODO: Replace with your registry/image path
+          image: context-cloak-mcp-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: mcp
+          envFrom:
+            - configMapRef:
+                name: mcp-server-config
+            - secretRef:
+                name: mcp-server-credentials
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /mcp
+              port: mcp
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /mcp
+              port: mcp
+              httpHeaders:
+                - name: Content-Type
+                  value: application/json
+            initialDelaySeconds: 10
+            periodSeconds: 30

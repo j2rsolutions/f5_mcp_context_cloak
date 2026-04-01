@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: context-cloak
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 1Gi is plenty for this lab
+      storage: 1Gi
+  # TODO: Set storageClassName if your cluster doesn't have a default.
+  # storageClassName: local-path
