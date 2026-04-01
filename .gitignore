@@ -37,5 +37,8 @@ Thumbs.db
 # Kubernetes secrets (local overrides)
 kubernetes/overlays/*/secrets/
 
+# Claude Code
+.claude/
+
 # Docker
 *.log
