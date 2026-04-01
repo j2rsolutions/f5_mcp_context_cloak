@@ -102,11 +102,21 @@ extension_services:
             network: default
             mtu: 1500
 
+          myHttpd:
+            class: HTTPD
+            allow:
+              - all
+
+          mySshd:
+            class: SSHD
+            allow:
+              - all
+
           myDbVariables:
             class: DbVariables
             ui.advisory.enabled: true
             ui.advisory.color: blue
-            ui.advisory.text: "Context Cloak Lab — BIG-IP VE (AWS)"
+            ui.advisory.text: "Context Cloak Lab - BIG-IP VE (AWS)"
 
 post_onboard_enabled: []
 RUNTIME_CONFIG
