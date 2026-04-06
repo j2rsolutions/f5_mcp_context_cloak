@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Context Cloak - PII Cloaking for AI Inference</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+        h1 { color: #00d4ff; margin-bottom: 5px; font-size: 24px; }
+        h2 { color: #00d4ff; margin: 25px 0 15px; font-size: 18px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+        h3 { color: #aaa; margin: 15px 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+        .subtitle { color: #888; margin-bottom: 25px; font-size: 14px; }
+        .card { background: #16213e; border-radius: 8px; padding: 20px; margin-bottom: 20px; border: 1px solid #333; }
+        label { display: block; color: #aaa; font-size: 13px; margin-bottom: 4px; }
+        input, select { width: 100%; padding: 8px 12px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-size: 14px; margin-bottom: 12px; }
+        input:focus, select:focus { outline: none; border-color: #00d4ff; }
+        .row { display: flex; gap: 15px; }
+        .row > div { flex: 1; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .btn-primary { background: #00d4ff; color: #1a1a2e; }
+        .btn-danger { background: #ff4757; color: white; }
+        .btn-secondary { background: #444; color: #e0e0e0; }
+        .btn:hover { opacity: 0.9; }
+        .btn + .btn { margin-left: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { text-align: left; color: #00d4ff; font-size: 12px; text-transform: uppercase; padding: 8px; border-bottom: 2px solid #333; }
+        td { padding: 8px; border-bottom: 1px solid #222; }
+        td input, td select { margin-bottom: 0; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-deployed { background: #00b894; color: white; }
+        .status-undeployed { background: #636e72; color: white; }
+        .field-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #222; }
+        .field-row input, .field-row select { margin-bottom: 0; }
+        .remove-btn { background: none; border: none; color: #ff4757; cursor: pointer; font-size: 18px; }
+        .add-btn { color: #00d4ff; background: none; border: 1px dashed #00d4ff; padding: 8px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 10px; }
+        .actions { margin-top: 25px; display: flex; gap: 10px; }
+        .note { color: #666; font-size: 12px; font-style: italic; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <h1>Context Cloak</h1>
+    <p class="subtitle">Privacy-preserving PII cloaking for MCP-assisted LLM workflows</p>
+
+    <div id="status-bar" class="card" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <span>Deployment Status: </span>
+            <span id="deploy-status" class="status status-undeployed">Not Deployed</span>
+        </div>
+        <div>
+            <button class="btn btn-primary" onclick="deploy()">Deploy</button>
+            <button class="btn btn-danger" onclick="undeploy()">Undeploy</button>
+        </div>
+    </div>
+
+    <!-- MCP Endpoint -->
+    <h2>MCP Server</h2>
+    <div class="card">
+        <div class="row">
+            <div>
+                <label>Virtual Server IP</label>
+                <input type="text" id="mcp-vs-ip" placeholder="10.0.1.100">
+            </div>
+            <div>
+                <label>Port</label>
+                <input type="number" id="mcp-vs-port" value="443">
+            </div>
+        </div>
+        <div class="row">
+            <div>
+                <label>Pool Member Address</label>
+                <input type="text" id="mcp-pool-addr" placeholder="32.192.169.232">
+            </div>
+            <div>
+                <label>Pool Member Port</label>
+                <input type="number" id="mcp-pool-port" value="443">
+            </div>
+        </div>
+        <label>Backend Host Header (for ingress routing)</label>
+        <input type="text" id="mcp-host-header" placeholder="mcp.ai.company.com">
+    </div>
+
+    <!-- LLM Endpoints -->
+    <h2>LLM Endpoints</h2>
+    <div id="llm-endpoints">
+        <div class="card llm-endpoint" data-index="0">
+            <h3>Endpoint 1</h3>
+            <div class="row">
+                <div>
+                    <label>Name</label>
+                    <input type="text" class="llm-name" placeholder="qwen-7b">
+                </div>
+                <div>
+                    <label>Hostname</label>
+                    <input type="text" class="llm-hostname" placeholder="mistral-7b.ai.company.com">
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label>Virtual Server IP</label>
+                    <input type="text" class="llm-vs-ip" placeholder="10.0.1.101">
+                </div>
+                <div>
+                    <label>VS Port</label>
+                    <input type="number" class="llm-vs-port" value="443">
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label>Pool Member Address</label>
+                    <input type="text" class="llm-pool-addr" placeholder="32.192.169.232">
+                </div>
+                <div>
+                    <label>Pool Member Port</label>
+                    <input type="number" class="llm-pool-port" value="443">
+                </div>
+            </div>
+            <label>API Path</label>
+            <input type="text" class="llm-api-path" value="/v1/chat/completions">
+        </div>
+    </div>
+    <button class="add-btn" onclick="addLlmEndpoint()">+ Add LLM Endpoint</button>
+
+    <!-- PII Fields -->
+    <h2>PII Field Configuration</h2>
+    <div class="card">
+        <p class="note">Define which JSON fields in MCP responses contain PII and how to cloak them.</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Field Name</th>
+                    <th>Aliases</th>
+                    <th>Cloak Mode</th>
+                    <th>Type / Label</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="pii-fields">
+                <tr>
+                    <td><input type="text" value="full_name" style="width:120px"></td>
+                    <td><input type="text" value="customer_name" style="width:140px" placeholder="comma-separated"></td>
+                    <td><select><option value="substitute">Substitute</option><option value="tokenize">Tokenize</option><option value="disabled">Disabled</option></select></td>
+                    <td><select><option value="name">Name Pool</option><option value="digit_shift">Digit Shift</option><option value="email">Email</option><option value="phone">Phone</option></select></td>
+                    <td><button class="remove-btn" onclick="this.closest('tr').remove()">x</button></td>
+                </tr>
+                <tr>
+                    <td><input type="text" value="ssn" style="width:120px"></td>
+                    <td><input type="text" value="" style="width:140px" placeholder="comma-separated"></td>
+                    <td><select><option value="substitute">Substitute</option><option value="tokenize" selected>Tokenize</option><option value="disabled">Disabled</option></select></td>
+                    <td><input type="text" value="SSN" style="width:100px" placeholder="Token label"></td>
+                    <td><button class="remove-btn" onclick="this.closest('tr').remove()">x</button></td>
+                </tr>
+                <tr>
+                    <td><input type="text" value="account_number" style="width:120px"></td>
+                    <td><input type="text" value="" style="width:140px" placeholder="comma-separated"></td>
+                    <td><select><option value="substitute" selected>Substitute</option><option value="tokenize">Tokenize</option><option value="disabled">Disabled</option></select></td>
+                    <td><select><option value="name">Name Pool</option><option value="digit_shift" selected>Digit Shift</option><option value="email">Email</option><option value="phone">Phone</option></select></td>
+                    <td><button class="remove-btn" onclick="this.closest('tr').remove()">x</button></td>
+                </tr>
+                <tr>
+                    <td><input type="text" value="phone" style="width:120px"></td>
+                    <td><input type="text" value="" style="width:140px"></td>
+                    <td><select><option value="substitute" selected>Substitute</option><option value="tokenize">Tokenize</option><option value="disabled">Disabled</option></select></td>
+                    <td><select><option value="name">Name Pool</option><option value="digit_shift">Digit Shift</option><option value="email">Email</option><option value="phone" selected>Phone</option></select></td>
+                    <td><button class="remove-btn" onclick="this.closest('tr').remove()">x</button></td>
+                </tr>
+                <tr>
+                    <td><input type="text" value="email" style="width:120px"></td>
+                    <td><input type="text" value="" style="width:140px"></td>
+                    <td><select><option value="substitute" selected>Substitute</option><option value="tokenize">Tokenize</option><option value="disabled">Disabled</option></select></td>
+                    <td><select><option value="name">Name Pool</option><option value="digit_shift">Digit Shift</option><option value="email" selected>Email</option><option value="phone">Phone</option></select></td>
+                    <td><button class="remove-btn" onclick="this.closest('tr').remove()">x</button></td>
+                </tr>
+            </tbody>
+        </table>
+        <button class="add-btn" onclick="addPiiField()">+ Add PII Field</button>
+    </div>
+
+    <!-- Session Config -->
+    <h2>Session Configuration</h2>
+    <div class="card">
+        <div class="row">
+            <div>
+                <label>Session ID Source</label>
+                <select id="session-source">
+                    <option value="client_ip">Client IP Address</option>
+                    <option value="header">HTTP Header</option>
+                </select>
+            </div>
+            <div>
+                <label>Header Name (if header source)</label>
+                <input type="text" id="session-header" value="X-Cloak-Session">
+            </div>
+            <div>
+                <label>TTL (seconds)</label>
+                <input type="number" id="session-ttl" value="3600">
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+        <button class="btn btn-primary" onclick="saveConfig()">Save Configuration</button>
+        <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
+    </div>
+
+    <script>
+        var BASE = '/mgmt/shared/context-cloak';
+
+        function addPiiField() {
+            var tbody = document.getElementById('pii-fields');
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td><input type="text" value="" style="width:120px" placeholder="field_name"></td>' +
+                '<td><input type="text" value="" style="width:140px" placeholder="comma-separated"></td>' +
+                '<td><select><option value="substitute">Substitute</option><option value="tokenize">Tokenize</option><option value="disabled">Disabled</option></select></td>' +
+                '<td><select><option value="name">Name Pool</option><option value="digit_shift">Digit Shift</option><option value="email">Email</option><option value="phone">Phone</option></select></td>' +
+                '<td><button class="remove-btn" onclick="this.closest(\'tr\').remove()">x</button></td>';
+            tbody.appendChild(tr);
+        }
+
+        function addLlmEndpoint() {
+            var container = document.getElementById('llm-endpoints');
+            var idx = container.children.length;
+            var div = document.createElement('div');
+            div.className = 'card llm-endpoint';
+            div.dataset.index = idx;
+            div.innerHTML = '<h3>Endpoint ' + (idx + 1) + ' <button class="remove-btn" onclick="this.closest(\'.llm-endpoint\').remove()" style="float:right">x</button></h3>' +
+                '<div class="row"><div><label>Name</label><input type="text" class="llm-name" placeholder="model-name"></div>' +
+                '<div><label>Hostname</label><input type="text" class="llm-hostname" placeholder="model.ai.company.com"></div></div>' +
+                '<div class="row"><div><label>Virtual Server IP</label><input type="text" class="llm-vs-ip" placeholder="10.0.1.102"></div>' +
+                '<div><label>VS Port</label><input type="number" class="llm-vs-port" value="443"></div></div>' +
+                '<div class="row"><div><label>Pool Member Address</label><input type="text" class="llm-pool-addr" placeholder="x.x.x.x"></div>' +
+                '<div><label>Pool Member Port</label><input type="number" class="llm-pool-port" value="443"></div></div>' +
+                '<label>API Path</label><input type="text" class="llm-api-path" value="/v1/chat/completions">';
+            container.appendChild(div);
+        }
+
+        function gatherConfig() {
+            var llmEps = [];
+            document.querySelectorAll('.llm-endpoint').forEach(function(el) {
+                llmEps.push({
+                    name: el.querySelector('.llm-name').value,
+                    hostname: el.querySelector('.llm-hostname').value,
+                    vs_ip: el.querySelector('.llm-vs-ip').value,
+                    vs_port: parseInt(el.querySelector('.llm-vs-port').value) || 443,
+                    pool_members: [{
+                        address: el.querySelector('.llm-pool-addr').value,
+                        port: parseInt(el.querySelector('.llm-pool-port').value) || 443
+                    }],
+                    api_path: el.querySelector('.llm-api-path').value
+                });
+            });
+
+            var piiFields = [];
+            document.querySelectorAll('#pii-fields tr').forEach(function(tr) {
+                var inputs = tr.querySelectorAll('input');
+                var selects = tr.querySelectorAll('select');
+                var aliases = inputs[1].value ? inputs[1].value.split(',').map(function(s){return s.trim();}) : [];
+                piiFields.push({
+                    field_name: inputs[0].value,
+                    aliases: aliases,
+                    cloak_mode: selects[0].value,
+                    substitute_type: selects[1] ? selects[1].value : '',
+                    token_label: inputs[2] ? inputs[2].value : '',
+                    digit_shift: 0
+                });
+            });
+
+            return {
+                mcp: {
+                    vs_ip: document.getElementById('mcp-vs-ip').value,
+                    vs_port: parseInt(document.getElementById('mcp-vs-port').value) || 443,
+                    pool_members: [{
+                        address: document.getElementById('mcp-pool-addr').value,
+                        port: parseInt(document.getElementById('mcp-pool-port').value) || 443
+                    }],
+                    host_header: document.getElementById('mcp-host-header').value,
+                    monitor: 'tcp'
+                },
+                llm_endpoints: llmEps,
+                pii_fields: piiFields,
+                session: {
+                    id_source: document.getElementById('session-source').value,
+                    id_header: document.getElementById('session-header').value,
+                    ttl: parseInt(document.getElementById('session-ttl').value) || 3600
+                },
+                fake_names: {
+                    first: ["Alice","Maria","David","Sarah","James","Emily","Michael","Lisa","Robert","Jennifer"],
+                    last: ["Johnson","Garcia","Wilson","Thompson","Anderson","Martinez","Brown","Davis","Taylor","Moore"]
+                },
+                partition: "Common"
+            };
+        }
+
+        function saveConfig() {
+            fetch(BASE + '/config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({config: gatherConfig()})
+            }).then(function(r){return r.json();}).then(function(d){
+                alert('Configuration saved');
+            }).catch(function(e){ alert('Error: ' + e); });
+        }
+
+        function deploy() {
+            saveConfig();
+            fetch(BASE + '/deploy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            }).then(function(r){return r.json();}).then(function(d){
+                if (d.error) { alert('Deploy error: ' + d.error); }
+                else { alert('Deployed successfully'); loadStatus(); }
+            }).catch(function(e){ alert('Error: ' + e); });
+        }
+
+        function undeploy() {
+            if (!confirm('Remove all Context Cloak objects?')) return;
+            fetch(BASE + '/undeploy', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            }).then(function(r){return r.json();}).then(function(d){
+                alert('Undeployed'); loadStatus();
+            }).catch(function(e){ alert('Error: ' + e); });
+        }
+
+        function loadStatus() {
+            fetch(BASE + '/status').then(function(r){return r.json();}).then(function(d){
+                var el = document.getElementById('deploy-status');
+                if (d.deployed) {
+                    el.textContent = 'Deployed';
+                    el.className = 'status status-deployed';
+                } else {
+                    el.textContent = 'Not Deployed';
+                    el.className = 'status status-undeployed';
+                }
+            });
+        }
+
+        function loadConfig() {
+            fetch(BASE + '/config').then(function(r){return r.json();}).then(function(d){
+                // Populate form from saved config
+                if (d && d.config) {
+                    var c = d.config;
+                    if (c.mcp) {
+                        document.getElementById('mcp-vs-ip').value = c.mcp.vs_ip || '';
+                        document.getElementById('mcp-vs-port').value = c.mcp.vs_port || 443;
+                        document.getElementById('mcp-host-header').value = c.mcp.host_header || '';
+                        if (c.mcp.pool_members && c.mcp.pool_members[0]) {
+                            document.getElementById('mcp-pool-addr').value = c.mcp.pool_members[0].address || '';
+                            document.getElementById('mcp-pool-port').value = c.mcp.pool_members[0].port || 443;
+                        }
+                    }
+                }
+            });
+            loadStatus();
+        }
+
+        // Load on page open
+        loadStatus();
+    </script>
+</body>
+</html>

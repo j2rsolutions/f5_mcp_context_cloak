@@ -6,9 +6,11 @@ resources:
 
 patches:
   - path: patches/mcp-server-replicas.yaml
+  - path: patches/imagepullsecret.yaml
+  - path: patches/postgres-emptydir.yaml
+  - path: patches/mcp-server-probes.yaml
 
-# Lab-specific image override if needed
-# images:
-#   - name: context-cloak-mcp-server
-#     newName: registry.lab.local/context-cloak-mcp-server
-#     newTag: latest
+images:
+  - name: context-cloak-mcp-server
+    newName: 081006927100.dkr.ecr.us-east-1.amazonaws.com/context-cloak-mcp-server
+    newTag: v3

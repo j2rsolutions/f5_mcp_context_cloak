@@ -1,6 +1,7 @@
 """MCP tool definitions for the Context Cloak server."""
 
 import json
+import re
 from decimal import Decimal
 
 from . import db
@@ -17,42 +18,40 @@ def _format_json(data) -> str:
     return json.dumps(data, cls=DecimalEncoder, default=str, indent=2)
 
 
-def get_customer_by_name(name: str) -> str:
-    """Look up a customer record by full name.
+def _resolve_customer(query: str) -> dict | None:
+    """Smart customer lookup -- tries SSN, account number, then name."""
+    query = query.strip()
+    if re.match(r"^\d{3}-\d{2}-\d{4}$", query):
+        return db.get_customer_by_ssn(query)
+    if re.match(r"^\d{4}-\d{4}-\d{4}", query):
+        return db.get_customer_by_account_number(query)
+    return db.get_customer_by_name(query)
 
-    Returns the customer's full profile including name, date of birth,
-    address, phone, and email. Does NOT return SSN — use get_customer_ssn
-    for that (separate tool for access control).
-    """
-    customer = db.get_customer_by_name(name)
+
+def find_customer(query: str) -> str:
+    customer = _resolve_customer(query)
     if customer is None:
-        return json.dumps({"error": f"No customer found with name '{name}'"})
-
-    db.log_tool_call("get_customer_by_name", customer["id"], None, json.dumps({"name": name}))
-
-    # Return everything except SSN (separate tool for that)
+        return json.dumps({"error": f"No customer found for '{query}'"})
+    db.log_tool_call("find_customer", customer["id"], None, json.dumps({"query": query}))
     result = {k: v for k, v in customer.items() if k != "ssn"}
     return _format_json(result)
 
 
-def get_customer_financial_summary(customer_name: str) -> str:
-    """Get all financial accounts and balances for a customer.
-
-    Returns account numbers, types, balances, and status for all accounts
-    belonging to the named customer.
-    """
-    customer = db.get_customer_by_name(customer_name)
+def get_customer_ssn(query: str) -> str:
+    customer = _resolve_customer(query)
     if customer is None:
-        return json.dumps({"error": f"No customer found with name '{customer_name}'"})
+        return json.dumps({"error": f"No customer found for '{query}'"})
+    ssn = db.get_customer_ssn(customer["id"])
+    db.log_tool_call("get_customer_ssn", customer["id"], None, json.dumps({"query": query}))
+    return _format_json({"customer_name": customer["full_name"], "ssn": ssn})
 
-    accounts = db.get_customer_financial_summary(customer["id"])
-    db.log_tool_call(
-        "get_customer_financial_summary",
-        customer["id"],
-        None,
-        json.dumps({"customer_name": customer_name}),
-    )
 
+def get_accounts(query: str) -> str:
+    customer = _resolve_customer(query)
+    if customer is None:
+        return json.dumps({"error": f"No customer found for '{query}'"})
+    accounts = db.get_accounts_for_customer(customer["id"])
+    db.log_tool_call("get_accounts", customer["id"], None, json.dumps({"query": query}))
     return _format_json({
         "customer_name": customer["full_name"],
         "customer_id": customer["id"],
@@ -60,26 +59,26 @@ def get_customer_financial_summary(customer_name: str) -> str:
     })
 
 
-def get_customer_ssn(customer_name: str) -> str:
-    """Retrieve the SSN for a customer. This is a sensitive operation.
-
-    Returns the Social Security Number for the named customer.
-    This tool exists separately from get_customer_by_name to allow
-    fine-grained access control.
-    """
-    customer = db.get_customer_by_name(customer_name)
-    if customer is None:
-        return json.dumps({"error": f"No customer found with name '{customer_name}'"})
-
-    ssn = db.get_customer_ssn(customer["id"])
-    db.log_tool_call(
-        "get_customer_ssn",
-        customer["id"],
-        None,
-        json.dumps({"customer_name": customer_name}),
-    )
-
+def get_transactions(account_number: str, days: int = 30) -> str:
+    account = db.get_account_by_number(account_number)
+    if account is None:
+        return json.dumps({"error": f"No account found with number '{account_number}'"})
+    txns = db.get_transactions(account_number, days)
+    db.log_tool_call("get_transactions", None, None,
+                     json.dumps({"account_number": account_number, "days": days}))
+    credits = sum(t["amount"] for t in txns if t["amount"] > 0)
+    debits = sum(t["amount"] for t in txns if t["amount"] < 0)
     return _format_json({
-        "customer_name": customer["full_name"],
-        "ssn": ssn,
+        "account_number": account["account_number"],
+        "account_type": account["account_type"],
+        "customer_name": account["customer_name"],
+        "current_balance": account["balance"],
+        "period_days": days,
+        "summary": {
+            "total_credits": credits,
+            "total_debits": debits,
+            "net": credits + debits,
+            "transaction_count": len(txns),
+        },
+        "transactions": txns,
     })

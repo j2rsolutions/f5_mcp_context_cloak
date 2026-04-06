@@ -1,0 +1,19 @@
+{
+  "name": "f5-context-cloak",
+  "version": "0.1.0",
+  "description": "Privacy-preserving MCP-assisted LLM workflows — PII cloaking for AI inference via BIG-IP",
+  "main": "nodejs/context_cloak_worker.js",
+  "keywords": [
+    "f5",
+    "bigip",
+    "iapplx",
+    "mcp",
+    "llm",
+    "pii",
+    "cloaking",
+    "privacy"
+  ],
+  "author": "F5 Context Cloak",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

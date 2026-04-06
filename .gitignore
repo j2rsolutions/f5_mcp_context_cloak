@@ -43,3 +43,12 @@ kubernetes/overlays/*/secrets/
 
 # Docker
 *.log
+
+# Kubernetes config (sensitive)
+kubernetes/config/
+
+# RPM packages
+*.rpm
+
+# iAppLX build artifacts
+iapplx/*.rpm

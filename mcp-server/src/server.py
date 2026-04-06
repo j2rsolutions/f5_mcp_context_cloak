@@ -1,8 +1,8 @@
 """Context Cloak MCP Server.
 
-A simple MCP server that exposes customer data tools backed by Postgres.
-Designed to run behind an F5 BIG-IP that handles session persistence
-and PII anonymization.
+A simple MCP server that exposes customer and financial data tools
+backed by Postgres.  Designed to run behind an F5 BIG-IP that handles
+session persistence and PII cloaking.
 """
 
 from mcp.server.fastmcp import FastMCP
@@ -12,49 +12,62 @@ from . import tools
 
 mcp = FastMCP(
     "Context Cloak",
-    description="Customer data tools for the Context Cloak privacy-preserving LLM POC",
+    host=config.server_host,
+    port=config.server_port,
 )
 
 
 @mcp.tool()
-def get_customer_by_name(name: str) -> str:
-    """Look up a customer record by full name.
+def find_customer(query: str) -> str:
+    """Find a customer by name, SSN, or account number.
 
-    Returns the customer's profile including name, date of birth,
-    address, phone, and email. Use get_customer_ssn separately
-    to retrieve the SSN.
+    Returns the customer profile including name, date of birth,
+    address, phone, and email.  SSN is NOT included -- use
+    get_customer_ssn for that.
 
     Args:
-        name: Full name of the customer (e.g., "John Doe")
+        query: Customer name (e.g. "John Doe"), SSN (e.g. "078-05-1120"),
+               or account number (e.g. "4532-1189-0042")
     """
-    return tools.get_customer_by_name(name)
+    return tools.find_customer(query)
 
 
 @mcp.tool()
-def get_customer_financial_summary(customer_name: str) -> str:
+def get_customer_ssn(query: str) -> str:
+    """Retrieve the SSN for a customer.  This is a sensitive operation.
+
+    Args:
+        query: Customer name, SSN, or account number to identify the customer
+    """
+    return tools.get_customer_ssn(query)
+
+
+@mcp.tool()
+def get_accounts(query: str) -> str:
     """Get all financial accounts and balances for a customer.
 
     Returns account numbers, types, balances, currency, and status
-    for every account belonging to the named customer.
+    for every account belonging to the identified customer.
 
     Args:
-        customer_name: Full name of the customer (e.g., "John Doe")
+        query: Customer name, SSN, or account number to identify the customer
     """
-    return tools.get_customer_financial_summary(customer_name)
+    return tools.get_accounts(query)
 
 
 @mcp.tool()
-def get_customer_ssn(customer_name: str) -> str:
-    """Retrieve the SSN for a customer. This is a sensitive operation.
+def get_transactions(account_number: str, days: int = 30) -> str:
+    """Get recent transaction history for a specific account.
 
-    Returns the Social Security Number for the named customer.
-    Access to this tool should be restricted in production.
+    Returns transactions sorted newest-first, with amount, description,
+    category, merchant, and a summary of total credits/debits.
 
     Args:
-        customer_name: Full name of the customer (e.g., "John Doe")
+        account_number: The account number (e.g. "4532-1189-0042")
+        days: Number of days of history to retrieve (default: 30)
     """
-    return tools.get_customer_ssn(customer_name)
+    return tools.get_transactions(account_number, days)
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host=config.server_host, port=config.server_port)
+    mcp.run(transport="streamable-http")
