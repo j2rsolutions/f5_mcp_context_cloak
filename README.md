@@ -172,14 +172,31 @@ The admin tells BIG-IP which JSON fields in MCP responses contain PII. The iRule
 
 Fields can be added, removed, or have their mode changed at any time. Click **Deploy** and the iRules regenerate from the new configuration.
 
-## What's Next: F5 AI Guardrails Integration
+## What Context Cloak Protects (and What It Doesn't)
 
-Context Cloak's tokenize mode is designed to complement **F5 AI Guardrails** and guardrails solutions. The `<<SSN:session:001>>` format is intentionally distinctive -- if any token leaks through de-cloaking (because the LLM rephrased or reformatted it), a guardrails policy can catch it as a pattern match violation.
+Context Cloak's cloaking table is **reactive** -- it learns what's PII by watching what comes back from MCP tool responses. This means:
 
-The vision: **Context Cloak as the first layer of defense (PII never reaches the LLM), AI Guardrails as the safety net (catches anything that slips through).** Defense in depth for AI data protection.
+**Protected:** PII retrieved from backend systems via MCP. When a user asks *"What is the SSN for John Doe?"*, the LLM calls the MCP tool, the MCP server queries Postgres and returns the SSN, and the BIG-IP MCP iRule extracts it, generates a fake, and stores the mapping. From that point forward, every time that SSN appears in an inference request, it gets cloaked. The user never typed the SSN -- it came from the database, and Context Cloak made sure the LLM never saw the real value.
 
-Future integration points:
-- AI Guardrails policy rules that flag `<<TYPE:...>>` patterns in LLM responses
+**Not protected:** PII the user types directly into the prompt before any MCP call happens. If a user pastes `078-05-1120` into their first message, that goes to the LLM before the cloaking table exists. Context Cloak can't intercept what it hasn't learned yet.
+
+**In practice, this isn't how MCP workflows work.** The whole point of MCP is that the LLM *retrieves* data through tools -- the user says "look up John Doe" and the sensitive records (SSN, accounts, financial history) come from the database. The user provides a name or identifier; the backend provides the PII. That's the data Context Cloak protects.
+
+### Defense in Depth: F5 AI Guardrails
+
+For organizations that want to protect against that first-prompt edge case -- a user pasting raw PII directly into the chat -- **F5 AI Guardrails** can sit upstream and inspect prompts before they reach the LLM. A guardrails policy can detect SSN patterns, account number formats, or other sensitive data in user input and block or redact it before it ever leaves the client.
+
+The vision:
+
+1. **F5 AI Guardrails** inspects user prompts for PII patterns (first line of defense)
+2. **Context Cloak** cloaks backend-sourced PII from MCP responses (second line of defense)
+3. **Tokenize mode** produces `<<TYPE:ID:SEQ>>` tokens that guardrails can catch if any leak through de-cloaking (safety net)
+
+Three layers. The user can't accidentally paste PII (guardrails catches it). The database records never reach the LLM in cleartext (Context Cloak cloaks them). And if anything slips through, the tokenize format gives guardrails a distinctive pattern to flag.
+
+### Future Integration Points
+- AI Guardrails policy rules that detect PII patterns in user prompts
+- AI Guardrails policy rules that flag leaked `<<TYPE:...>>` tokens in LLM responses
 - Centralized cloaking policy management across multiple BIG-IP instances
 - Telemetry and audit logging for compliance reporting
 - Auto-discovery of MCP tool schemas for PII field detection
