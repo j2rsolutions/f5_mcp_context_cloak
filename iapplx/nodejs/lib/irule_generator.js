@@ -1,10 +1,42 @@
+/**
+ * iRule Generator for Context Cloak
+ *
+ * Dynamically generates BIG-IP iRules from the PII field configuration.
+ * Two iRules are produced:
+ *
+ * 1. MCP iRule (mcp_session_persistence):
+ *    - Handles MCP session affinity (Mcp-Session-Id enrichment)
+ *    - Collects MCP response bodies (with rechunk for SSE streams)
+ *    - Iterates the data group to find PII fields in the response JSON
+ *    - Generates fake values (substitute mode) or tokens (tokenize mode)
+ *    - Stores bidirectional mappings in a session-keyed subtable
+ *    - Passes the response through UNMODIFIED (enables tool chaining)
+ *
+ * 2. Inference iRule (vllm_anonymization):
+ *    - Cloaks inference requests: string map real -> fake
+ *    - De-cloaks inference responses: string map fake -> real
+ *    - Optionally injects a system prompt for tokenize guidance
+ *
+ * Key design decisions:
+ * - Tcl double-quote strings use q() helper for consistent quoting
+ * - Regex patterns use set+append with braces to avoid Tcl bracket interpretation
+ * - Base64 file writes (via bigip_client.js) avoid heredoc escaping issues
+ * - Data group iteration (class names/class match) makes fields configurable
+ *   without modifying iRule code
+ */
+
 'use strict';
 
-// Helper: quote a Tcl string value with double quotes
+// Helper: wrap a string in Tcl double quotes
 function q(s) { return '"' + s + '"'; }
-// Helper: brace a Tcl value (for regex patterns with square brackets)
+// Helper: wrap in Tcl braces (prevents substitution -- used for regex patterns)
 function b(s) { return '{' + s + '}'; }
 
+/**
+ * Generate the MCP Virtual Server iRule.
+ * This iRule builds the cloaking table by extracting PII from MCP responses.
+ * The response passes through unmodified so tool chaining works.
+ */
 function generateMcpIrule(config) {
     var ttl = config.session.ttl || 3600;
     var prefix = 'cloak_';

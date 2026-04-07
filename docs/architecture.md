@@ -1,225 +1,233 @@
 # Architecture
 
-## Why Substitution, Not Masking or Tokenization
+## Design Philosophy
 
-There are three common approaches to hiding sensitive data from an LLM. Context Cloak uses the third — and this section explains why.
+Context Cloak is built on three principles:
 
-### Approach 1: Masking (redaction)
+1. **The enforcement point should be the network, not the application.** MCP servers shouldn't need to know about cloaking. LLMs shouldn't need special prompts. BIG-IP sits in the data path and handles everything transparently.
 
-Replace PII with asterisks or `[REDACTED]` markers:
+2. **Extract from structure, substitute with exact matching.** PII is identified from structured MCP JSON responses (known field names), not from regex scanning arbitrary text. Substitution uses exact `[string map]` -- no pattern matching that might false-positive.
 
-```
-"Generate a report for ******* with SSN ***-**-**** and account ****-****-****"
-```
+3. **The LLM should never know its data is fake.** Realistic substitution preserves the model's reasoning ability. Tokenization (`<<SSN:...>>`) is available as an option but is primarily for guardrails integration, not for natural LLM interaction.
 
-**Why it fails:** The LLM can't reason about data it can't see. It can't format an SSN it doesn't have, can't reference an account number in a summary, and can't distinguish between two redacted customers in the same prompt. The output is generic and useless for the analyst's actual task.
+## Why Substitution Over Masking or Tokenization
 
-### Approach 2: Tokenization (placeholders)
+| Approach | Example | LLM sees | LLM behavior | User sees |
+|---|---|---|---|---|
+| **Masking** | `SSN: ****` | Nothing useful | Can't reason, generic output | Useless report |
+| **Tokenization** | `SSN: <<SSN:001>>` | Placeholder | Knows it's fake, may hallucinate | Risk of leaked tokens |
+| **Substitution** | `SSN: 523-50-6675` | Realistic fake | Reasons naturally, perfect output | Real data (de-cloaked) |
 
-Replace PII with structured tokens like `<<SSN:abc123:001>>`:
-
-```
-"Generate a report for <<NAME:abc123:001>> with SSN <<SSN:abc123:002>>"
-```
-
-**Why it fails:** The LLM knows these aren't real values. It may:
-- Hallucinate around them ("I notice the SSN appears to be a placeholder...")
-- Refuse to process them ("I can't generate a report with masked data")
-- Produce awkward output that includes the raw tokens
-- Break formatting, validation, and calculation logic
-
-The model's behavior changes because the data *looks* fake.
-
-### Approach 3: Substitution (Context Cloak's approach)
-
-Replace PII with **realistic fake values** that are structurally identical:
-
-```
-"Generate a report for Maria Garcia with SSN 523-50-6675 and account 7865-4412-3375"
-```
-
-**Why it works:** The LLM has no idea the data is fake. "Maria Garcia" looks like a real name. "523-50-6675" looks like a real SSN. The model reasons about it naturally — formatting, calculations, report generation, validation — everything works exactly as it would with real data. The model's behavior is identical because the data *looks* real.
-
-This is conceptually similar to a **substitution cipher** — every real value maps to a consistent fake value within the session, and the mapping is reversed on the way back. It's also the same principle behind [James Veitch's famous approach to messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email) — swap "bank account" for "candy" and the scammer doesn't realize they're negotiating over gummy bears instead of wire transfers. The structure of the conversation is preserved; only the sensitive nouns change.
-
-### The key insight: extract from structure, substitute with string map
-
-The cloaking table is populated by reading **structured MCP tool responses** (JSON with known field names like `full_name`, `ssn`, `account_number`). This is deterministic — we know exactly what's PII because we know the schema.
-
-The substitution is applied using **exact string matching** (`[string map]` in Tcl) on the inference request/response. No regex scanning of arbitrary text. No pattern matching that might false-positive. Just: "find this exact string, replace with that exact string."
-
-This separation — structured extraction, exact substitution — gives us the reliability of field-level parsing with the simplicity of text replacement.
+Substitution is a **cipher** -- structurally identical to the real data, consistently mapped within a session, and transparently reversed. The LLM's behavior is indistinguishable from processing real data because the data *looks* real.
 
 ## Data Flow
 
 ```
-┌──────────┐     ┌──────────────┐     ┌────────────────────────┐     ┌────────────┐     ┌──────────┐
-│          │     │              │     │   BIG-IP MCP VS        │     │            │     │          │
-│  User    ├────►│  Open WebUI  ├────►│   - Session persist    ├────►│ MCP Server ├────►│ Postgres │
-│          │     │              │     │   - Build cloak table  │     │            │     │          │
-└──────────┘     │              │     │   - Pass data through  │     └────────────┘     └──────────┘
-                 │              │     └────────────────────────┘
-                 │  (has real   │
-                 │   PII data)  │     ┌────────────────────────┐     ┌──────────┐
-                 │              ├────►│   BIG-IP Inference VS  ├────►│  vLLM    │
-                 │              │     │   - Cloak request      │     │ (Qwen)   │
-                 │              │◄────┤     real → fake        │◄────┤          │
-                 │              │     │   - Decloak response   │     │ sees only│
-                 └──────────────┘     │     fake → real        │     │ fake PII │
-                                      └────────────────────────┘     └──────────┘
+User asks question
+    |
+    v
+Open WebUI ──► BIG-IP MCP VS ──► MCP Server ──► Postgres
+                    |                                |
+              Builds cloaking                   Returns real
+              table from response               PII data
+              (field-level extraction)              |
+                    |                               |
+              Passes response              ◄────────┘
+              through UNMODIFIED
+                    |
+                    v
+Open WebUI receives real data
+Open WebUI chains tool calls (real data works)
+Open WebUI composes prompt with real PII
+    |
+    v
+Open WebUI ──► BIG-IP Inference VS ──► vLLM / Qwen
+                    |                       |
+              string map                Sees only
+              real -> fake              fake PII
+                    |                       |
+              Prompt sent              Generates
+              with fake PII            response with
+                    |                  fake values
+                    |                       |
+              string map               ◄────┘
+              fake -> real
+                    |
+                    v
+              User sees real data
+              in the final response
 ```
 
-### Step by step
+### Why MCP Responses Pass Through Unmodified
 
-1. **User asks:** "Look up John Doe and show his transactions"
-2. **Open WebUI** calls MCP tools through BIG-IP MCP VS
-3. **MCP VS** forwards to MCP server, receives response with real PII
-4. **MCP VS scans the response** — extracts PII from known JSON fields (`full_name`, `ssn`, `account_number`, `phone`, `email`), generates deterministic fakes, stores bidirectional mappings in a session-keyed subtable. **Response passes through unmodified.**
-5. **Open WebUI** receives real data. Tool chaining works because the data is real.
-6. **Open WebUI** composes a prompt with the real PII and sends to vLLM through BIG-IP Inference VS
-7. **Inference VS REQUEST:** looks up the cloaking table, replaces all real PII with fakes using `[string map]`. vLLM receives: "Maria Garcia", "523-50-6675", "7865-4412-3375"
-8. **vLLM generates** a response using the fake data — it has no idea it's fake
-9. **Inference VS RESPONSE:** looks up the cloaking table, replaces all fakes back to reals using `[string map]`. User receives: "John Doe", "078-05-1120", "4532-1189-0042"
+Earlier iterations cloaked the MCP response before it reached Open WebUI. This broke **tool chaining** -- when the LLM tried to call `get_accounts("Alice Johnson")` (the fake name), the MCP server returned "not found" because Alice Johnson doesn't exist in the database.
 
-### Why the MCP response passes through unmodified
+By passing real data through the MCP path and cloaking only at the inference boundary, tool chaining works naturally. Open WebUI has real data to work with, and BIG-IP swaps it at the last moment before the LLM sees it.
 
-Earlier iterations of this project cloaked the MCP response before it reached Open WebUI. This broke **tool chaining** — when the LLM tried to call `get_accounts("Alice Johnson")`, the MCP server returned "not found" because Alice Johnson doesn't exist in the database.
+## Cloaking Table
 
-By passing real data through the MCP path and cloaking only at the inference boundary, tool chaining works naturally. Open WebUI has real data to compose its prompts, and the BIG-IP swaps it out at the last moment before it hits the LLM.
-
-## Component Diagram
-
-```mermaid
-graph LR
-    User([User]) --> OpenWebUI[Open WebUI]
-
-    subgraph Trusted Zone
-        OpenWebUI
-        subgraph Kubernetes - RKE2
-            MCP[MCP Server]
-            PG[(Postgres)]
-        end
-    end
-
-    subgraph BIG-IP TMOS v21
-        MCP_VS[MCP Virtual Server<br/>Session persistence<br/>+ Cloaking table builder]
-        INF_VS[Inference Virtual Server<br/>Request cloaking<br/>+ Response de-cloaking]
-        CLOAK[(Cloaking Table<br/>Subtable per session<br/>real ↔ fake mappings)]
-        MCP_VS --- CLOAK
-        INF_VS --- CLOAK
-    end
-
-    subgraph Untrusted Zone
-        vLLM[vLLM / Qwen 2.5 7B]
-    end
-
-    OpenWebUI -->|MCP JSON-RPC 2.0| MCP_VS
-    MCP_VS -->|Session-pinned| MCP
-    MCP --> PG
-
-    OpenWebUI -->|Prompt with real PII| INF_VS
-    INF_VS -->|Prompt with FAKE PII| vLLM
-    vLLM -->|Response with fake PII| INF_VS
-    INF_VS -->|Response with REAL PII restored| OpenWebUI
-```
-
-## Cloaking Table Structure
-
-The cloaking table is a BIG-IP subtable, one per session, with a configurable TTL (default 1 hour).
+The cloaking table is a BIG-IP **subtable** -- an in-memory key-value store scoped to a session, with configurable TTL (default 1 hour).
 
 ```
 Subtable: cloak_<session_id>
 
   Key                          Value               Purpose
-  ─────────────────────────    ──────────────────   ──────────────────────────────
-  r2f_John Doe                 Maria Garcia         Real-to-fake (used on inference request)
-  f2r_Maria Garcia             John Doe             Fake-to-real (used on inference response)
+  ─────────────────────────    ──────────────────   ──────────────────────
+  r2f_John Doe                 Maria Garcia         Request cloaking (real->fake)
+  f2r_Maria Garcia             John Doe             Response de-cloaking (fake->real)
   r2f_078-05-1120              523-50-6675          SSN mapping
   f2r_523-50-6675              078-05-1120
-  r2f_4532-1189-0042           7865-4412-3375       Account mapping
-  f2r_7865-4412-3375           4532-1189-0042
-  _real_list                   John Doe|            Index of all real values
-                               078-05-1120|         (pipe-delimited, used by
-                               4532-1189-0042       Inference VS to cloak requests)
-  _fake_list                   Maria Garcia|        Index of all fake values
-                               523-50-6675|         (pipe-delimited, used by
-                               7865-4412-3375       Inference VS to decloak responses)
+  _real_list                   John Doe|078-05-1120  Index for request cloaking
+  _fake_list                   Maria Garcia|523-...  Index for response de-cloaking
 ```
 
-### Session ID derivation
+### Session ID
 
 Both the MCP VS and Inference VS derive the session ID the same way:
-1. `X-Cloak-Session` header if present (preferred)
-2. Client IP address (fallback — works when both VS see the same source IP)
+1. `X-Cloak-Session` header (if present)
+2. Client IP address (fallback)
 
-### Fake value generation
+This ensures both virtual servers reference the same subtable.
 
-| PII Type       | Generation Strategy                              | Example                     |
-|----------------|--------------------------------------------------|-----------------------------|
-| Name           | Deterministic pick from 10x10 fake name pool     | John Doe → Maria Garcia     |
-| SSN            | Shift each digit by +5 mod 10                    | 078-05-1120 → 523-50-6675   |
-| Phone          | Shift each digit by +4 mod 10                    | 217-555-0142 → 651-999-4586 |
-| Email          | Hash-picked name + @example.net                  | john@email.com → maria.garcia@example.net |
-| Account number | Shift each digit by +3 mod 10                    | 4532-1189-0042 → 7865-4412-3375 |
+### Fake Value Generation
 
-Dollar amounts, transaction descriptions, dates, and other non-identifying fields are **not cloaked** — they don't identify a person.
+| PII Type | Strategy | Example |
+|---|---|---|
+| Name | Hash-based pick from 10x10 name pool | John Doe -> Maria Garcia |
+| SSN | Shift each digit by +5 mod 10 | 078-05-1120 -> 523-50-6675 |
+| Phone | Shift each digit by +4 mod 10 | 217-555-0142 -> 651-999-4586 |
+| Email | Hash-picked name @example.net | john@email.com -> maria.garcia@example.net |
+| Account # | Shift each digit by +3 mod 10 | 4532-1189-0042 -> 7865-4412-3375 |
+
+Dollar amounts, dates, descriptions, and other non-identifying fields are **not cloaked**.
 
 ## iRule Architecture
 
 ### MCP VS iRule (`mcp_session_persistence`)
 
-**HTTP_REQUEST:** MCP session persistence — Mcp-Session-Id header enrichment, pool member pinning
-
-**HTTP_RESPONSE:** Mcp-Session-Id enrichment, SSE endpoint injection, body collection (uses `rechunk` HTTP profile to de-chunk SSE responses)
-
-**HTTP_RESPONSE_DATA:** Cloaking table builder — scans the response body for known PII field names (`full_name`, `customer_name`, `ssn`, `phone`, `email`, `account_number`), generates fake values, stores bidirectional mappings. **Does not modify the response.**
+| Event | What it does |
+|---|---|
+| `RULE_INIT` | Initialize config: TTL, prefix, fake name pools, data group reference |
+| `HTTP_REQUEST` | MCP session persistence (Mcp-Session-Id parsing, pool pinning) |
+| `HTTP_RESPONSE` | Mcp-Session-Id enrichment, SSE injection, body collection (rechunk) |
+| `HTTP_RESPONSE_DATA` | **Cloaking table builder** -- iterates data group entries, matches fields in JSON, generates fakes, stores mappings. Does NOT modify the response. |
 
 ### Inference VS iRule (`vllm_anonymization`)
 
-**HTTP_REQUEST:** Collects request body for cloaking
+| Event | What it does |
+|---|---|
+| `RULE_INIT` | Initialize config: cloak prefix, tokenize prompt |
+| `HTTP_REQUEST` | Detect inference paths, collect request body |
+| `HTTP_REQUEST_DATA` | **Request cloaking** -- `[string map]` real->fake, optional tokenize prompt injection |
+| `HTTP_RESPONSE` | Collect response body |
+| `HTTP_RESPONSE_DATA` | **Response de-cloaking** -- `[string map]` fake->real |
 
-**HTTP_REQUEST_DATA:** Cloaking — looks up `_real_list` from the session's cloaking table, builds `[string map]` of real→fake pairs sorted by length (longest first), applies to the request body. vLLM receives only fake PII.
+### Data Group: `context_cloak_fields`
 
-**HTTP_RESPONSE:** Collects response body for de-cloaking
+The iRules are **data-group-driven** -- no PII field names are hardcoded. The data group maps field names to cloaking modes:
 
-**HTTP_RESPONSE_DATA:** De-cloaking — looks up `_fake_list`, builds `[string map]` of fake→real pairs sorted by length, applies to the response body. User receives real PII.
-
-## Network Topology
-
-```mermaid
-graph TB
-    subgraph Client VLAN
-        OW[Open WebUI<br/>K8s cluster]
-    end
-
-    subgraph BIG-IP
-        MCP_VIP["MCP VIP<br/>10.0.1.100:443<br/>EIP: 18.210.135.91"]
-        INF_VIP["Inference VIP<br/>10.0.1.101:443<br/>EIP: 52.3.24.169"]
-    end
-
-    subgraph Server VLAN - Kubernetes
-        MCP1[MCP Server Pod<br/>context-cloak namespace]
-        PG[Postgres<br/>context-cloak namespace]
-    end
-
-    subgraph Inference
-        VLLM[vLLM / Qwen 2.5 7B<br/>default namespace]
-    end
-
-    OW --> MCP_VIP
-    OW --> INF_VIP
-    MCP_VIP -->|via K8s ingress| MCP1
-    MCP1 --> PG
-    INF_VIP -->|via K8s ingress| VLLM
+```
+ltm data-group internal context_cloak_fields {
+    records {
+        full_name     { data "substitute:name" }
+        customer_name { data "substitute:name" }
+        ssn           { data "tokenize:SSN" }
+        account_number{ data "substitute:digit_shift:3" }
+        phone         { data "substitute:phone:4" }
+        email         { data "substitute:email" }
+    }
+}
 ```
 
-## Trust Boundaries
+Change the data group, the cloaking behavior changes instantly. The iAppLX GUI manages this automatically.
 
-| Zone | Components | Sees Real PII? |
+## iAppLX Architecture
+
+```
+f5-context-cloak/
+├── nodejs/
+│   └── restWorker.js          # REST API worker (config, deploy, undeploy)
+├── lib/
+│   ├── irule_generator.js     # Generates iRules from PII field config
+│   └── bigip_client.js        # tmsh execution + file write via REST
+├── presentation/
+│   └── index.html             # Configuration web UI
+└── package.json
+```
+
+### REST API
+
+| Method | Body | Action |
 |---|---|---|
-| MCP Server + Postgres | Source of truth | Yes |
-| BIG-IP (Enforcement) | MCP VS + Inference VS + Cloaking Table | Yes — performs the swap |
-| Open WebUI | Chat UI, MCP orchestration | Yes — receives real data from MCP |
-| vLLM / Qwen (Untrusted) | LLM inference | **No — only sees fake data** |
+| `GET /mgmt/shared/context-cloak` | -- | Return config + deployment state |
+| `POST` | `{config: {...}}` | Save configuration |
+| `POST` | `{action: "deploy"}` | Undeploy existing, then deploy all objects |
+| `POST` | `{action: "undeploy"}` | Remove all Context Cloak objects |
 
-The LLM is the only component in the pipeline that never sees real PII. Every other component in the trusted zone handles real data. The BIG-IP is the enforcement boundary that ensures the swap happens transparently.
+### Deploy Sequence
+
+1. Delete existing Context Cloak objects (idempotent)
+2. Create data group from PII field config
+3. Create HTTP profile with `rechunk`
+4. Create client-ssl profile
+5. Generate MCP + Inference iRules from config, write to files, merge via tmsh
+6. Create MCP pool, server-ssl (with SNI), host header iRule, virtual server
+7. Create LLM pool(s), server-ssl, host header iRule(s), virtual server(s)
+8. Save config
+
+## Network Topology (AWS)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    AWS VPC 10.0.0.0/16                   │
+│                                                          │
+│  Management Subnet 10.0.0.0/24                          │
+│    eth0: 10.0.0.200 (EIP) -- SSH/HTTPS mgmt             │
+│                                                          │
+│  External Subnet 10.0.1.0/24                            │
+│    eth1: 10.0.1.200 (EIP) -- Self IP                    │
+│          10.0.1.100 (EIP) -- MCP VIP                    │
+│          10.0.1.101 (EIP) -- Inference VIP              │
+│                                                          │
+│  Internal Subnet 10.0.2.0/24                            │
+│    eth2: 10.0.2.200 -- Pool member traffic              │
+│                                                          │
+│  Routes: mgmt + external via IGW, internal isolated     │
+└─────────────────────────────────────────────────────────┘
+```
+
+## MCP Server Architecture
+
+```
+mcp-server/
+├── src/
+│   ├── server.py      # FastMCP entry point, tool registration
+│   ├── tools.py       # Tool implementations with smart customer lookup
+│   ├── db.py          # Postgres access layer (psycopg 3)
+│   └── config.py      # Environment-based configuration
+└── sql/
+    ├── 001_schema.sql  # customers, financial_accounts, transactions, audit_log
+    └── 002_seed_data.sql  # 5 customers, 13 accounts, 51 transactions
+```
+
+### Tools
+
+| Tool | Input | Output | PII Fields |
+|---|---|---|---|
+| `find_customer` | name, SSN, or account # | Customer profile (no SSN) | full_name, phone, email |
+| `get_customer_ssn` | name, SSN, or account # | SSN only | customer_name, ssn |
+| `get_accounts` | name, SSN, or account # | All accounts + balances | customer_name, account_number |
+| `get_transactions` | account #, days | Transaction history + summary | customer_name, account_number |
+
+All tools support **smart lookup** -- pass a name, SSN, or account number and the resolver figures out which one based on format.
+
+## Future: F5 AI Gateway Integration
+
+Context Cloak's tokenize mode produces `<<TYPE:SESSION:SEQ>>` patterns designed to be caught by downstream guardrails. The integration path:
+
+1. **Context Cloak** cloaks PII at the BIG-IP layer (first defense)
+2. **F5 AI Gateway** inspects LLM responses for leaked `<<...>>` tokens (safety net)
+3. If a token leaks (LLM rephrased it, de-cloaking missed it), AI Gateway flags or blocks the response
+4. Audit logs from both layers provide compliance evidence
+
+This is **defense in depth** for AI data protection.

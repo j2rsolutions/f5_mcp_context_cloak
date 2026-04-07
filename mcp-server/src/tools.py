@@ -1,4 +1,15 @@
-"""MCP tool definitions for the Context Cloak server."""
+"""MCP tool definitions for the Context Cloak server.
+
+Each tool function:
+1. Resolves the customer using smart lookup (name, SSN, or account number)
+2. Queries Postgres via the db layer
+3. Logs the tool invocation for audit
+4. Returns formatted JSON with PII fields that the BIG-IP cloaking table builder
+   will extract (full_name, customer_name, ssn, account_number, phone, email)
+
+The tool functions are intentionally simple -- they don't know about cloaking.
+All PII protection is handled transparently by the BIG-IP iRules.
+"""
 
 import json
 import re
@@ -19,7 +30,13 @@ def _format_json(data) -> str:
 
 
 def _resolve_customer(query: str) -> dict | None:
-    """Smart customer lookup -- tries SSN, account number, then name."""
+    """Smart customer lookup -- detects the query format and routes accordingly.
+
+    Accepts:
+      - SSN format (###-##-####) -> lookup by SSN
+      - Account number format (####-####-####) -> lookup by account, return owner
+      - Anything else -> lookup by name (case-insensitive)
+    """
     query = query.strip()
     if re.match(r"^\d{3}-\d{2}-\d{4}$", query):
         return db.get_customer_by_ssn(query)

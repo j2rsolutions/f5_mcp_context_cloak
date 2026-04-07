@@ -1,189 +1,240 @@
 # Context Cloak
 
-> Privacy-preserving MCP-assisted LLM workflows with F5 BIG-IP
+> Privacy-preserving PII cloaking for MCP-assisted LLM workflows, powered by F5 BIG-IP
 
 **Status:** Lab / Proof of Concept
 
-## Overview
+---
 
-Context Cloak demonstrates how to use **F5 BIG-IP TMOS v21** as a privacy enforcement point in an LLM pipeline. An **MCP server** retrieves sensitive customer records from Postgres. BIG-IP sits in the middle — it learns what PII exists by reading the structured MCP responses, then **substitutes real values with realistic fakes** before the prompt reaches the LLM. On the way back, it restores the originals. The LLM never knows it's working with fake data.
+## The Story
 
-Think of it like [James Veitch messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email) — swap "bank account" for "candy" and the conversation works perfectly, but the scammer never gets the real information. Same principle: swap "John Doe" for "Maria Garcia" and the LLM generates a perfect financial report, but it never sees the real customer.
+As I dove deeper into the world of AI -- MCP servers, LLM orchestration, tool-calling models, agentic workflows -- one question kept nagging me: **how do you use the power of LLMs to process sensitive data without actually exposing that data to the model?**
 
-| Component | Role | Provided By |
+Banks, healthcare providers, government agencies -- they all want to leverage AI for report generation, customer analysis, and workflow automation. But the data they need to process is full of PII: Social Security Numbers, account numbers, names, phone numbers. Sending that to an LLM (whether cloud-hosted or self-hosted) creates a security and compliance risk that most organizations can't accept.
+
+I've spent years working with F5 technology, and when I learned that **BIG-IP TMOS v21 added native support for the MCP protocol**, the lightbulb went on. BIG-IP already sits in the data path between clients and servers. It already inspects, transforms, and enforces policy on HTTP traffic. What if it could **transparently cloak PII before it reaches the LLM, and de-cloak it on the way back?**
+
+That's Context Cloak.
+
+## The Problem
+
+An analyst asks an LLM: *"Generate a financial report for John Doe, SSN 078-05-1120, account 4532-1189-0042."*
+
+The LLM now has real PII. Whether it's logged, cached, fine-tuned on, or exfiltrated -- that data is exposed. Traditional approaches fail here:
+
+| Approach | What happens | Why it fails |
 |---|---|---|
-| **Open WebUI** | Chat UI and MCP orchestration | Pre-existing |
-| **BIG-IP TMOS v21** | MCP session routing + PII substitution | This repo (Terraform + iRules) |
-| **MCP Server** | Financial data tools via JSON-RPC 2.0 | This repo (Python + Kubernetes) |
-| **Postgres** | Customer, account, and transaction data | This repo (Kubernetes) |
-| **vLLM** | LLM inference (Qwen 2.5 7B Instruct) | Pre-existing |
+| **Masking** (`****`) | LLM can't see the data | Can't reason about what it can't see |
+| **Tokenization** (`<<SSN:001>>`) | LLM sees placeholders | Knows it's fake, hallucinates or refuses |
+| **Do nothing** | LLM sees real PII | Security and compliance violation |
 
-## Why Substitution, Not Masking
+## The Solution: Value Substitution
 
-There are three ways to hide PII from an LLM. We use the third:
+Context Cloak takes a different approach -- **substitute real PII with realistic fake values**:
 
-| Approach | Example | Problem |
-|---|---|---|
-| **Masking** | `Report for **** with SSN ***-**-****` | LLM can't reason about data it can't see |
-| **Tokenization** | `Report for <<NAME:001>> with SSN <<SSN:002>>` | LLM knows it's fake, hallucinates or refuses |
-| **Substitution** | `Report for Maria Garcia with SSN 523-50-6675` | LLM thinks it's real, behaves naturally |
+- `John Doe` becomes `Maria Garcia`
+- `078-05-1120` becomes `523-50-6675`
+- `4532-1189-0042` becomes `7865-4412-3375`
 
-Substitution is a **cipher** — every real value maps to a consistent fake within the session, and the mapping is reversed transparently. The LLM's behavior is identical to processing real data because the data *looks* real.
+The LLM sees what looks like real data and reasons about it naturally. It generates a perfect financial report for "Maria Garcia." On the way back, BIG-IP swaps the fakes back to the real values. The user sees a report about John Doe. **The LLM never knew John Doe existed.**
 
-See [docs/architecture.md](docs/architecture.md) for the full design rationale.
+This is conceptually a **substitution cipher** -- every real value maps to a consistent fake within the session, and the mapping is reversed transparently. Think of it like [James Veitch messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email) -- swap "bank account" for "candy" and the conversation works perfectly, but the scammer never gets the real information.
+
+## Example Scenario
+
+**Use case:** A financial analyst at a bank needs to review a customer's recent spending patterns.
+
+1. The analyst opens a chat UI (Open WebUI) and asks: *"Look up customer John Doe, get his accounts, and summarize his last 30 days of transactions."*
+
+2. The LLM calls MCP tools to fetch data from the bank's customer database through BIG-IP. The MCP server returns real customer data -- name, SSN, account numbers, transaction history.
+
+3. **BIG-IP intercepts the MCP response**, reads the structured JSON fields, and builds a cloaking table: `John Doe -> Maria Garcia`, `078-05-1120 -> 523-50-6675`, etc. The real data passes through to Open WebUI so the LLM can chain tool calls.
+
+4. When Open WebUI sends the prompt to the LLM, **BIG-IP intercepts the inference request** and swaps every real PII value with its fake counterpart using exact string matching.
+
+5. The LLM generates: *"Maria Garcia's checking account (7865-4412-3375) shows $6,400 in deposits and $3,034 in spending over the last 30 days..."*
+
+6. **BIG-IP intercepts the response** and swaps fakes back to reals. The analyst sees: *"John Doe's checking account (4532-1189-0042) shows $6,400 in deposits and $3,034 in spending..."*
+
+The LLM produced a perfect report. It never saw John Doe's real SSN. The analyst got exactly what they needed.
+
+## Why BIG-IP?
+
+F5 BIG-IP was the natural candidate for this:
+
+- **Already in the data path** -- BIG-IP is a reverse proxy/ADC that organizations already deploy between clients and servers
+- **MCP protocol support** -- TMOS v21 added native MCP awareness via iRules
+- **iRules** -- Tcl-based traffic manipulation that can inspect, transform, and rewrite HTTP payloads in real-time
+- **Subtables** -- In-memory key-value storage perfect for session-scoped cloaking maps
+- **iAppLX** -- Deployable application packages with REST APIs and web UIs
+- **Trust boundary** -- BIG-IP is already the enforcement point for SSL termination, WAF, and access control
 
 ## Architecture
 
 ```
-User → Open WebUI → BIG-IP MCP VS → MCP Server → Postgres
-                         |
-                    Builds cloaking table
-                    (real ↔ fake mappings)
-                    Passes real data through
-                         |
-       Open WebUI → BIG-IP Inference VS → vLLM
-                         |                    |
-                    Cloaks request         Sees only
-                    (real → fake)          fake PII
-                         |                    |
-                    Decloaks response      Generates
-                    (fake → real)          with fakes
-                         |
-                    User sees real data
+                        ┌─────────────────────────────┐
+                        │      F5 BIG-IP TMOS v21     │
+                        │                             │
+   ┌──────────┐        │  ┌─────────┐  ┌──────────┐  │        ┌──────────┐
+   │          │        │  │ MCP VS  │  │Cloaking  │  │        │          │
+   │  Open    │───────►│  │ Builds  │  │ Table    │  │◄───────│   MCP    │
+   │  WebUI   │        │  │ table   │  │ (subtable│  │        │  Server  │
+   │          │        │  │         │  │  per     │  │        │          │
+   │ (sees    │        │  └─────────┘  │  session)│  │        │ (Postgres│
+   │  real    │        │               │          │  │        │  backend)│
+   │  data)   │        │  ┌─────────┐  │ real↔fake│  │        └──────────┘
+   │          │───────►│  │Inference│  │ mappings │  │
+   │          │        │  │  VS     │  │          │  │        ┌──────────┐
+   │          │◄───────│  │ Cloaks  │  └──────────┘  │───────►│  vLLM    │
+   │          │        │  │ request │                 │        │ (Qwen)   │
+   └──────────┘        │  │ Decloaks│                 │        │          │
+                        │  │ response│                 │◄───────│ sees only│
+                        │  └─────────┘                 │        │ fake PII │
+                        └─────────────────────────────┘        └──────────┘
 ```
 
-## Data Flow
+### Data Flow
 
-1. **User asks** "Look up John Doe and show his transactions" in Open WebUI
-2. **Open WebUI** calls MCP tools through the BIG-IP MCP virtual server
-3. **BIG-IP MCP VS** forwards to the MCP server and receives the response
-4. **BIG-IP scans the response** — extracts PII from known JSON fields (`full_name`, `ssn`, `account_number`, etc.), generates deterministic fakes, stores bidirectional mappings in a session-keyed subtable. **Response passes through unmodified** so tool chaining works.
+1. **User asks a question** in Open WebUI
+2. **Open WebUI calls MCP tools** through BIG-IP MCP Virtual Server
+3. **BIG-IP MCP VS** forwards to MCP server, receives response with real PII
+4. **BIG-IP scans the response** -- extracts PII from known JSON fields, generates deterministic fakes, stores bidirectional mappings in a session-keyed subtable. **Response passes through unmodified** so tool chaining works.
 5. **Open WebUI** receives real data, chains tool calls, composes a prompt
-6. **Open WebUI** sends the prompt to vLLM through the BIG-IP Inference VS
-7. **BIG-IP Inference VS** cloaks the request — `[string map]` swaps all real PII with fakes. vLLM sees "Maria Garcia" and "523-50-6675" instead of "John Doe" and "078-05-1120"
-8. **vLLM generates** a response using fake data
-9. **BIG-IP Inference VS** de-cloaks the response — swaps fakes back to reals
+6. **Open WebUI sends prompt** to vLLM through BIG-IP Inference VS
+7. **BIG-IP Inference VS cloaks the request** -- `[string map]` swaps all real PII with fakes
+8. **vLLM generates** a response using fake data -- it has no idea it's fake
+9. **BIG-IP Inference VS de-cloaks the response** -- swaps fakes back to reals
 10. **User sees** the final report with real data restored
 
-## MCP Tools
+### Trust Boundaries
 
-The MCP server exposes four tools for financial data access:
-
-| Tool | Description | Lookup |
+| Zone | Components | Sees Real PII? |
 |---|---|---|
-| `find_customer(query)` | Customer profile (no SSN) | By name, SSN, or account number |
-| `get_customer_ssn(query)` | SSN only (sensitive) | By name, SSN, or account number |
-| `get_accounts(query)` | All accounts + balances | By name, SSN, or account number |
-| `get_transactions(account_number, days)` | Transaction history with summary | By account number |
+| MCP Server + Postgres | Source of truth | Yes |
+| BIG-IP (Enforcement) | MCP VS + Inference VS + Cloaking Table | Yes -- performs the swap |
+| Open WebUI | Chat UI, MCP orchestration | Yes -- receives real data from MCP |
+| vLLM / Qwen (Untrusted) | LLM inference | **No -- only sees fake data** |
 
-All tools support smart lookup — pass a name ("John Doe"), SSN ("078-05-1120"), or account number ("4532-1189-0042") and it figures out which one.
+## iAppLX: Context Cloak Application
 
-## Cloaking Details
+Context Cloak is packaged as an **iAppLX extension** -- a deployable application on BIG-IP with a REST API and web-based configuration UI.
 
-### What gets cloaked
+### What the iAppLX Does
 
-| PII Type | Fake Generation | Example |
-|---|---|---|
-| Name | Pick from 10x10 fake name pool | John Doe → Maria Garcia |
-| SSN | Shift digits by +5 mod 10 | 078-05-1120 → 523-50-6675 |
-| Phone | Shift digits by +4 mod 10 | 217-555-0142 → 651-999-4586 |
-| Email | Hash-picked name @example.net | john@email.com → maria.garcia@example.net |
-| Account # | Shift digits by +3 mod 10 | 4532-1189-0042 → 7865-4412-3375 |
+When deployed, it creates all required BIG-IP objects:
 
-### What doesn't get cloaked
+- **Data Group** (`context_cloak_fields`) -- maps PII field names to cloaking modes
+- **iRules** -- dynamically generated from your PII field configuration
+- **HTTP Profile** -- with `rechunk` to handle SSE/chunked MCP responses
+- **SSL Profiles** -- client-ssl for frontend, server-ssl with SNI for backends
+- **Pools + Monitors** -- for MCP server and LLM endpoints
+- **Virtual Servers** -- MCP VS and Inference VS with all profiles and iRules attached
 
-Dollar amounts, transaction descriptions, dates, merchant names, and other non-identifying fields pass through unchanged — they don't identify a person.
+### Configuration UI
 
-### Session consistency
+Access at `https://<bigip>/iapps/f5-context-cloak/index.html` after installation.
 
-The cloaking table is keyed by session ID. Within a session, "John Doe" always maps to "Maria Garcia". Across tool calls, account lookups, and transaction queries — the same fake identity is used consistently.
+The UI provides:
 
-## Trust Boundaries
+- **MCP Server** -- Virtual server IP, pool member, host header for backend routing
+- **LLM Endpoints** -- Multiple LLM backends with hostname-based routing
+- **PII Field Configuration** -- The core of Context Cloak:
 
-```
-  Trusted (sees real PII)              Untrusted (sees only fakes)
- ┌──────────────────────┐             ┌─────────────────────┐
- │ MCP Server + Postgres│             │                     │
- │ Open WebUI           │  ◄─ BIG-IP ─►  vLLM / Qwen       │
- │ BIG-IP control plane │   cloak /   │  sees Maria Garcia  │
- └──────────────────────┘   decloak   │  not John Doe       │
-                                      └─────────────────────┘
-```
+| Field | Aliases | Mode | Type / Label |
+|---|---|---|---|
+| `full_name` | `customer_name` | Substitute | Name Pool |
+| `ssn` | | Tokenize | SSN |
+| `account_number` | | Substitute | Digit Shift |
+| `phone` | | Substitute | Phone |
+| `email` | | Substitute | Email |
 
-## Limitations & Security Caveats
+- **Tokenize Guidance Prompt** -- System message injected when tokenize mode is active
+- **Session Configuration** -- TTL, session ID source (client IP or header)
 
-> **This is a lab/POC.** Do not use in production without significant hardening.
+### Cloaking Modes
 
-- **LLM-derived values** — If the LLM computes values from cloaked inputs (e.g., mentions "Mr. Garcia" when only "Maria Garcia" was in the cloaking table), the partial reference won't be de-cloaked.
-- **Streaming responses** — The inference VS requires `Content-Length` for de-cloaking. Chunked/streaming vLLM responses pass through un-modified.
-- **Subtable TTL** — Cloaking entries expire after 1 hour. Long sessions may lose mappings.
-- **Single BIG-IP** — HA pairs would need subtable synchronization.
-- **Name pool size** — 10x10 = 100 unique name combinations. Sufficient for lab; extend for broader use.
-- **No auth on MCP server** — In production, add mTLS or token-based auth.
+**Substitute** -- Replace PII with realistic fake values:
+- Names: picked deterministically from a 10x10 fake name pool
+- SSN/Phone/Account: each digit shifted by a fixed offset mod 10
+- Email: derived from fake name pool + @example.net
 
-## Quick Start
+Best for: fields the LLM needs to reason about naturally (names in reports, account numbers in summaries).
+
+**Tokenize** -- Replace PII with structured placeholders:
+- Format: `<<TYPE:SESSION_ID:SEQUENCE>>` (e.g., `<<SSN:10.0.1.50:001>>`)
+- When enabled, a guidance prompt is injected telling the LLM to treat tokens as real values
+
+Best for: fields where you want downstream guardrails to catch any leaks, or where the LLM doesn't need to understand the value.
+
+### PII Field Configuration
+
+The admin tells BIG-IP which JSON fields in MCP responses contain PII. The iRule anchors on these field names when scanning responses -- no arbitrary regex scanning of free text. Because MCP responses are structured JSON with known schemas, extraction is deterministic and reliable.
+
+Fields can be added, removed, or have their mode changed at any time. Click **Deploy** and the iRules regenerate from the new configuration.
+
+## What's Next: F5 AI Gateway Integration
+
+Context Cloak's tokenize mode is designed to complement **F5 AI Gateway** and guardrails solutions. The `<<SSN:session:001>>` format is intentionally distinctive -- if any token leaks through de-cloaking (because the LLM rephrased or reformatted it), a guardrails policy can catch it as a pattern match violation.
+
+The vision: **Context Cloak as the first layer of defense (PII never reaches the LLM), AI Gateway as the safety net (catches anything that slips through).** Defense in depth for AI data protection.
+
+Future integration points:
+- AI Gateway policy rules that flag `<<TYPE:...>>` patterns in LLM responses
+- Centralized cloaking policy management across multiple BIG-IP instances
+- Telemetry and audit logging for compliance reporting
+- Auto-discovery of MCP tool schemas for PII field detection
+
+## Deployment
+
+See [docs/deployment.md](docs/deployment.md) for full deployment instructions.
+
+### Quick Start (Local Development)
 
 ```bash
-# 1. Clone and setup
 git clone <this-repo>
 cd f5_mcp_context_cloak
-make setup
-
-# 2. Start local Postgres and seed data
-make db-up
-make db-init
-
-# 3. Run MCP server locally
-make mcp-server
-
-# 4. Test MCP tools
-./scripts/test-mcp.sh
-
-# 5. Deploy to Kubernetes
-kubectl apply -k kubernetes/overlays/lab/
+make setup        # Python venv + dependencies
+make db-up        # Start local Postgres
+make db-init      # Load schema + seed data
+make mcp-server   # Run MCP server on localhost:8080
+./scripts/test-mcp.sh  # Test MCP tools
 ```
 
-### Deploy BIG-IP on AWS (BYOL)
+### Production Deployment
 
-```bash
-cd terraform/aws-infra
-cp terraform.tfvars.example terraform.tfvars
-# Edit: BYOL license key, admin password
-terraform init && terraform apply
-# Wait ~10 min for onboarding, then license via GUI or tmsh
-
-cd ../bigip
-cp terraform.tfvars.example terraform.tfvars
-# Edit: mgmt IP from aws-infra output, pool member IPs
-terraform init && terraform apply
-```
+1. **Deploy BIG-IP on AWS** -- `terraform/aws-infra/`
+2. **Deploy MCP Server + Postgres on Kubernetes** -- `kubernetes/overlays/lab/`
+3. **Install iAppLX** -- Upload RPM via BIG-IP Package Management LX
+4. **Configure via GUI** -- Set MCP/LLM endpoints, PII fields, deploy
 
 ## Repository Structure
 
 ```
-├── docs/                  # Architecture, design rationale, test plan
+├── docs/                  # Architecture, deployment guide, design rationale
 ├── examples/              # Prompts and curl examples
-├── irules/                # BIG-IP iRules (Tcl)
-│   ├── mcp_session_persistence.tcl   # Session affinity + cloaking table builder
-│   └── vllm_anonymization.tcl        # Request cloaking + response de-cloaking
-├── kubernetes/
-│   ├── base/              # Base Kustomize manifests
-│   └── overlays/lab/      # Lab-specific overrides (ECR image, emptyDir, probes)
-├── mcp-server/
-│   ├── src/               # Python MCP server (FastMCP + psycopg)
-│   └── sql/               # Schema and seed data (customers, accounts, transactions)
-├── scripts/
-│   ├── bootstrap.sh       # All-in-one local setup
-│   └── test-mcp.sh        # MCP tool test suite
-└── terraform/
-    ├── aws-infra/         # AWS VPC + BIG-IP VE instance (BYOL, 3-NIC)
-    └── bigip/             # BIG-IP application config (VS, pools, iRules)
+├── iapplx/                # BIG-IP iAppLX package
+│   ├── nodejs/            # REST worker + iRule generator + BIG-IP client
+│   ├── presentation/      # Configuration web UI
+│   └── scripts/           # RPM build script
+├── irules/                # BIG-IP iRules (standalone versions)
+│   ├── mcp_session_persistence.tcl   # MCP session + cloaking table builder
+│   └── vllm_anonymization.tcl        # Inference cloak/decloak
+├── kubernetes/            # Kustomize manifests
+│   ├── base/              # MCP server, Postgres, seed job, network policies
+│   └── overlays/lab/      # Lab patches (ECR, emptyDir, probes)
+├── mcp-server/            # Python MCP server (FastMCP + psycopg)
+│   ├── src/               # Server, tools, DB layer, config
+│   └── sql/               # Schema and seed data
+├── scripts/               # Bootstrap and test scripts
+└── terraform/             # Infrastructure as code
+    ├── aws-infra/         # AWS VPC + BIG-IP VE (BYOL, 3-NIC)
+    └── bigip/             # BIG-IP application config
 ```
 
 ## References
 
-- [Managing MCP in iRules — Part 1](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-1/344321)
-- [Managing MCP in iRules — Part 2](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-2/344421)
-- [Managing MCP in iRules — Part 3](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-3/344423)
+- [Managing MCP in iRules -- Part 1](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-1/344321)
+- [Managing MCP in iRules -- Part 2](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-2/344421)
+- [Managing MCP in iRules -- Part 3](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-3/344423)
 - [Model Context Protocol Specification](https://spec.modelcontextprotocol.io/)
 - [James Veitch: This is what happens when you reply to spam email (TED)](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email)
