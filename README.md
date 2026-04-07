@@ -25,7 +25,7 @@ The LLM now has real PII. Whether it's logged, cached, fine-tuned on, or exfiltr
 | Approach | What happens | Why it fails |
 |---|---|---|
 | **Masking** (`****`) | LLM can't see the data | Can't reason about what it can't see |
-| **Tokenization** (`<<SSN:001>>`) | LLM sees placeholders | Knows it's fake, hallucinates or refuses |
+| **Tokenization** (`<<SSN:001>>`) | LLM sees placeholders | Works with larger models (14B+); smaller models may hallucinate |
 | **Do nothing** | LLM sees real PII | Security and compliance violation |
 
 ## The Solution: Value Substitution
@@ -38,7 +38,7 @@ Context Cloak takes a different approach -- **substitute real PII with realistic
 
 The LLM sees what looks like real data and reasons about it naturally. It generates a perfect financial report for "Maria Garcia." On the way back, BIG-IP swaps the fakes back to the real values. The user sees a report about John Doe. **The LLM never knew John Doe existed.**
 
-This is conceptually a **substitution cipher** -- every real value maps to a consistent fake within the session, and the mapping is reversed transparently. Think of it like [James Veitch messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email) -- swap "bank account" for "candy" and the conversation works perfectly, but the scammer never gets the real information.
+This is conceptually a **substitution cipher** -- every real value maps to a consistent fake within the session, and the mapping is reversed transparently. Think of it like [James Veitch messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email?t=280) -- at about the 4:40 mark, he describes swapping banking terms for types of candy, and the scammer keeps negotiating without realizing they're discussing gummy bears instead of wire transfers. Same principle: swap the sensitive nouns, keep the structure, and the conversation works perfectly.
 
 ## Example Scenario
 
@@ -164,7 +164,7 @@ Best for: fields the LLM needs to reason about naturally (names in reports, acco
 - Format: `<<TYPE:SESSION_ID:SEQUENCE>>` (e.g., `<<SSN:10.0.1.50:001>>`)
 - When enabled, a guidance prompt is injected telling the LLM to treat tokens as real values
 
-Best for: fields where you want downstream guardrails to catch any leaks, or where the LLM doesn't need to understand the value.
+Best for: defense-in-depth with F5 AI Gateway, or fields where guardrails need to catch leaks. A guidance prompt is automatically injected to instruct the LLM to reproduce tokens verbatim. Larger models (14B+ parameters) handle this reliably; smaller models (7B) may struggle. Both modes can be mixed per-field in the same request.
 
 ### PII Field Configuration
 
@@ -237,4 +237,4 @@ make mcp-server   # Run MCP server on localhost:8080
 - [Managing MCP in iRules -- Part 2](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-2/344421)
 - [Managing MCP in iRules -- Part 3](https://community.f5.com/kb/technicalarticles/managing-model-context-protocol-in-irules---part-3/344423)
 - [Model Context Protocol Specification](https://spec.modelcontextprotocol.io/)
-- [James Veitch: This is what happens when you reply to spam email (TED)](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email)
+- [James Veitch: This is what happens when you reply to spam email (TED, skip to 4:40)](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email?t=280)
