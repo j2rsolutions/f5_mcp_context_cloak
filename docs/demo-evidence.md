@@ -1,105 +1,114 @@
-# Demo Evidence: Substitute Mode in Action
+# Context Cloak — Demo Evidence
 
-This document captures real output from the Context Cloak proof-of-concept demonstrating how PII is substituted before reaching the LLM and restored on return.
+This document captures real output from the Context Cloak proof-of-concept, with screenshots and GIFs demonstrating each step of the pipeline.
 
-## What the LLM Received (vLLM Logs)
+---
 
-The analyst asked: *"What accounts are associated to John Doe?"*
+## Step 1: Install the iAppLX Package
 
-After the BIG-IP cloaked the request, **this is what Qwen 14B actually saw** (captured from vLLM server logs):
+Upload the RPM via BIG-IP iApps > Package Management LX.
 
+![Installing the Context Cloak RPM on BIG-IP](gifs/load_rpm.gif)
+
+*The RPM installs alongside existing iAppLX packages (AS3, Service Discovery).*
+
+---
+
+## Step 2: Configure and Deploy via GUI
+
+Access the Context Cloak GUI and configure MCP server, LLM endpoint, and PII fields.
+
+![Context Cloak GUI — configuring endpoints and PII fields](gifs/context_cloak_deploy.gif)
+
+*All PII fields configured with Substitute mode: full_name, ssn, account_number, phone, email. Click Deploy to create all BIG-IP objects.*
+
+![Deployment output — session config and JSON result](gifs/context_cloak_output.gif)
+
+*The deployment output shows the saved configuration including session TTL, fake name pools, and partition settings.*
+
+---
+
+## Step 3: Verify Virtual Servers
+
+After deployment, the BIG-IP shows two virtual servers created by Context Cloak.
+
+![BIG-IP Local Traffic — Context Cloak virtual servers](gifs/show_vs.gif)
+
+*MCP VS (10.0.1.100:443) and Inference VS (10.0.1.101:443) — both with cloaking iRules, SSL profiles, and pool members attached.*
+
+---
+
+## Step 4: Baseline — Direct Mode (No Cloaking)
+
+Before demonstrating cloaking, show what happens WITHOUT Context Cloak. The LLM sees real PII.
+
+![Direct mode — no cloaking, real PII visible in vLLM logs](gifs/test_no_cloak.gif)
+
+*Left: Kubernetes pod logs showing vLLM receiving requests. Right: Open WebUI with direct (uncloaked) Qwen model selected. All PII flows to the LLM in cleartext.*
+
+---
+
+## Demo 1: Substitute Mode — SSN Lookup
+
+**Prompt:** "Show me the SSN number for John Doe. Just display the number."
+
+![Substitute mode — SSN lookup for John Doe](gifs/demo_cloak_substitution_ssn_john_doe.gif)
+
+*Left: Open WebUI showing Qwen 2.5 14B Instruct with cloaked MCP tools enabled. Right: Context Cloak GUI showing all fields set to Substitute mode. The BIG-IP builds the cloaking table from the MCP response and swaps PII in the inference request.*
+
+**Result:** User sees real SSN `078-05-1120`. LLM saw a fake SSN (digit-shifted).
+
+---
+
+## Demo 2: Substitute Mode — Account Lookup
+
+**Prompt:** "What accounts are associated to John Doe?"
+
+![Substitute mode — account lookup showing cloaked vs real data](gifs/demo_cloak_substitution_accounts_john_doe.gif)
+
+*Left: Open WebUI showing de-cloaked response with real account numbers (4532-1189-0042, etc.). Right: vLLM server logs showing the LLM received "Maria Garcia" with fake account numbers (7865-4412-3375, etc.).*
+
+### What the LLM saw (vLLM logs):
 ```json
 {
   "customer_name": "Maria Garcia",
-  "customer_id": 1,
   "accounts": [
-    {
-      "account_number": "7865-4412-3375",
-      "account_type": "checking",
-      "balance": "45230.18",
-      "currency": "USD",
-      "opened_date": "2010-06-01",
-      "status": "active"
-    },
-    {
-      "account_number": "7865-4412-3322",
-      "account_type": "investment",
-      "balance": "312500.00",
-      "currency": "USD",
-      "opened_date": "2018-01-10",
-      "status": "active"
-    },
-    {
-      "account_number": "7865-4412-3376",
-      "account_type": "savings",
-      "balance": "128750.00",
-      "currency": "USD",
-      "opened_date": "2010-06-01",
-      "status": "active"
-    }
+    {"account_number": "7865-4412-3375", "account_type": "checking", "balance": "45230.18"},
+    {"account_number": "7865-4412-3322", "account_type": "investment", "balance": "312500.00"},
+    {"account_number": "7865-4412-3376", "account_type": "savings", "balance": "128750.00"}
   ]
 }
 ```
 
-The LLM prompt asked: *"what accounts are associated to Maria Garcia"*
-
-**The LLM never saw "John Doe" or any real account numbers.**
-
-## What the User Received (Open WebUI)
-
-After the BIG-IP de-cloaked the response, **this is what the analyst saw**:
-
-> The accounts associated with **John Doe** are as follows:
->
-> **Checking Account:**
-> - Account Number: **4532-1189-0042**
-> - Balance: $45,230.18 USD
-> - Opened Date: June 1, 2010
-> - Status: Active
->
-> **Investment Account:**
-> - Account Number: **4532-1189-0099**
-> - Balance: $312,500.00 USD
-> - Opened Date: January 10, 2018
-> - Status: Active
->
-> **Savings Account:**
-> - Account Number: **4532-1189-0043**
-> - Balance: $128,750.00 USD
-> - Opened Date: June 1, 2010
-> - Status: Active
-
-## Substitution Map
-
-| Field | Real Value (user sees) | Fake Value (LLM sees) | Method |
-|---|---|---|---|
-| Customer Name | John Doe | Maria Garcia | Name pool hash |
-| Checking Account | 4532-1189-0042 | 7865-4412-3375 | Digit shift +3 |
-| Investment Account | 4532-1189-0099 | 7865-4412-3322 | Digit shift +3 |
-| Savings Account | 4532-1189-0043 | 7865-4412-3376 | Digit shift +3 |
-
-Note: Dollar amounts ($45,230.18, $312,500.00, $128,750.00) are **not cloaked** -- they are not PII and pass through unchanged.
-
-## BIG-IP Cloaking Logs
-
-```
-CloakTable: customer_name (substitute) (session=32.192.169.232)
-CloakTable: account_number (substitute) (session=32.192.169.232)
-CloakTable: scan complete (session=32.192.169.232)
-Cloak: request cloaked (4 values, session=32.192.169.232)
-Decloak: response de-cloaked (4 values, session=32.192.169.232)
-```
+### What the user saw (Open WebUI):
+- Customer: **John Doe**
+- Checking: **4532-1189-0042** — $45,230.18
+- Investment: **4532-1189-0099** — $312,500.00
+- Savings: **4532-1189-0043** — $128,750.00
 
 ---
 
-# Demo Evidence: Tokenize Mode in Action
+## Demo 3: Switching to Tokenize Mode
 
-## What the LLM Received (vLLM Logs)
+Change SSN from Substitute to Tokenize in the GUI and redeploy.
 
-The analyst asked: *"Show me the SSN number for Jane Smith. Just display the number."*
+![Changing PII fields from Substitute to Tokenize](gifs/context_cloak_change_to_tokenize.gif)
 
-After the BIG-IP cloaked the request with **mixed modes** (substitute for name, tokenize for SSN), **this is what Qwen 14B actually saw**:
+*The GUI allows per-field mode changes. When Tokenize is selected, the Type column switches to a free-text label field (e.g., "SSN").*
 
+---
+
+## Demo 4: Tokenize Mode — SSN with Mixed Modes
+
+**Prompt:** "Show me the SSN number for Jane Smith. Just display the number."
+
+SSN set to Tokenize, name set to Substitute.
+
+![Tokenize mode — Jane Smith SSN with mixed modes](gifs/context_cload_tokenize_ssn_jane_smith.gif)
+
+*Left: Open WebUI showing real SSN `219-09-9999` (de-cloaked). Right: vLLM logs showing the LLM received `"customer_name": "Maria Thompson"` and `"ssn": "<<SSN:32.192.169.232:001>>"` — a substituted name and a tokenized SSN in the same request.*
+
+### What the LLM saw:
 ```json
 {
   "customer_name": "Maria Thompson",
@@ -107,124 +116,66 @@ After the BIG-IP cloaked the request with **mixed modes** (substitute for name, 
 }
 ```
 
-The LLM saw a fake name ("Maria Thompson") and a tokenized SSN placeholder. The BIG-IP also injected a guidance prompt instructing the LLM to reproduce the `<<SSN:...>>` token exactly.
-
-## What the User Received (Open WebUI)
-
-> The SSN given is **219-09-9999** [1].
-
-The BIG-IP de-cloaked:
-- `Maria Thompson` → `Jane Smith`
-- `<<SSN:32.192.169.232:001>>` → `219-09-9999`
-
-## Substitution + Tokenization Map (Mixed Mode)
-
-| Field | Real Value (user sees) | Cloaked Value (LLM sees) | Mode |
-|---|---|---|---|
-| Customer Name | Jane Smith | Maria Thompson | **Substitute** (name pool) |
-| SSN | 219-09-9999 | `<<SSN:32.192.169.232:001>>` | **Tokenize** |
-
-## Key Insight: Mixed Modes Per Field
-
-Both modes operated **in the same request** on the same customer record. The name was substituted with a realistic fake (for natural LLM reasoning), while the SSN was tokenized with a structured placeholder (for guardrails detection). The BIG-IP data group configuration drives this per-field:
-
-```
-full_name       → substitute:name
-ssn             → tokenize:SSN
-account_number  → substitute:digit_shift:3
-```
+### What the user saw:
+- Customer: **Jane Smith**
+- SSN: **219-09-9999**
 
 ---
 
----
+## Demo 5: Full Tokenize — All Fields
 
-# Demo Evidence: Full Tokenize Mode — All Fields
+**Prompt:** "Show me the SSN and account information for Carlos Rivera. Display all the numbers."
 
-## What the LLM Received (vLLM Logs)
+ALL fields set to Tokenize mode.
 
-The analyst asked: *"Show me the SSN and account information for Carlos Rivera. Display all the numbers."*
+![Full tokenize — all PII fields as tokens, all de-cloaked on return](gifs/context_cloak_tokenize_accounts_jane_smith.gif)
 
-With **all fields set to tokenize**, the BIG-IP replaced every PII value with `<<TYPE:SESSION:SEQ>>` placeholders. **This is what Qwen 14B actually saw**:
+*Left: Open WebUI showing fully de-cloaked response with real data for Carlos Rivera. Right: vLLM logs showing every PII field as a `<<TYPE:SESSION:SEQ>>` token — the LLM never saw a single real value.*
 
+### What the LLM saw:
 ```json
 {
-  "id": 3,
   "full_name": "<<name:32.192.169.232:001>>",
-  "date_of_birth": "1978-11-03",
+  "ssn": "<<SSN:32.192.169.232:002>>",
   "phone": "<<phone:32.192.169.232:002>>",
   "email": "<<email:32.192.169.232:001>>",
-}
-```
-
-```json
-{
-  "customer_name": "<<name:32.192.169.232:001>>",
-  "ssn": "<<SSN:32.192.169.232:002>>"
-}
-```
-
-```json
-{
-  "customer_name": "<<name:32.192.169.232:001>>",
   "accounts": [
-    {"account_number": "<<digit_shift:32.192.169.232:002>>", "account_type": "checking", "balance": "89120.45"},
-    {"account_number": "<<digit_shift:32.192.169.232:003>>", "account_type": "investment", "balance": "890000.00"},
-    {"account_number": "<<digit_shift:32.192.169.232:004>>", "account_type": "savings", "balance": "245000.00"}
+    {"account_number": "<<digit_shift:32.192.169.232:002>>", "account_type": "checking"},
+    {"account_number": "<<digit_shift:32.192.169.232:003>>", "account_type": "investment"},
+    {"account_number": "<<digit_shift:32.192.169.232:004>>", "account_type": "savings"}
   ]
 }
 ```
 
-Even the user's prompt was tokenized: *"show me the SSN and account information for <<name:32.192.169.232:001>>. Display all the numbers."*
+### What the user saw:
+- Name: **Carlos Rivera**
+- SSN: **323-45-6789**
+- Checking: **6789-3345-0022** — $89,120.45
+- Investment: **6789-3345-0024** — $890,000.00
+- Savings: **6789-3345-0023** — $245,000.00
 
-**The LLM never saw "Carlos Rivera", his SSN, phone, email, or any real account numbers.**
+### The Punchline
 
-## What the User Received (Open WebUI)
+Qwen's last line in the response:
 
-> The Social Security Number (SSN) and account details for **Carlos Rivera** are as follows:
->
-> **Social Security Number (SSN):**
-> **323-45-6789**
->
-> **Account Information:**
->
-> **Checking Account:**
-> - Account Number: **6789-3345-0022**
-> - Balance: $89,120.45
->
-> **Investment Account:**
-> - Account Number: **6789-3345-0024**
-> - Balance: $890,000.00
->
-> **Savings Account:**
-> - Account Number: **6789-3345-0023**
-> - Balance: $245,000.00
->
-> All numerical data has been displayed as requested. [1][2][3]
->
-> *Please note that the actual numerical values for the SSN and account numbers are masked due to privacy concerns.*
+> *"Please note that the actual numerical values for the SSN and account numbers are masked due to privacy concerns."*
 
-## The Punchline
-
-Qwen's last line: *"Please note that the actual numerical values for the SSN and account numbers are masked due to privacy concerns."*
-
-**The LLM genuinely believes it showed the user masked/placeholder data.** It has no idea that the BIG-IP de-cloaked every token back to the real values before the user saw them. The LLM is apologizing for showing "masked" data — while the user sees the full, real, unmasked report.
-
-This is Context Cloak working exactly as designed.
-
-## Full Tokenization Map
-
-| Field | Real Value (user sees) | Token (LLM sees) | Mode |
-|---|---|---|---|
-| Name | Carlos Rivera | `<<name:32.192.169.232:001>>` | Tokenize |
-| SSN | 323-45-6789 | `<<SSN:32.192.169.232:002>>` | Tokenize |
-| Phone | 212-555-0167 | `<<phone:32.192.169.232:002>>` | Tokenize |
-| Email | carlos.rivera@example.com | `<<email:32.192.169.232:001>>` | Tokenize |
-| Checking Acct | 6789-3345-0022 | `<<digit_shift:32.192.169.232:002>>` | Tokenize |
-| Investment Acct | 6789-3345-0024 | `<<digit_shift:32.192.169.232:003>>` | Tokenize |
-| Savings Acct | 6789-3345-0023 | `<<digit_shift:32.192.169.232:004>>` | Tokenize |
+**The LLM genuinely believed it showed the user masked data.** It apologized for the "privacy masking" — not knowing that BIG-IP had already de-cloaked every token back to the real values. The user saw the full, real, unmasked report.
 
 ---
 
-## Key Takeaway
+## Summary
 
-The LLM produced a perfect financial report. It formatted account numbers, organized by account type, and presented balances clearly. Its behavior was identical to processing real data -- because the substituted data **looked real** (substitute mode) or because the guidance prompt told it to treat tokens as real values (tokenize mode). The LLM had no idea the data wasn't real.
+| Demo | Mode | Customer | LLM Saw | User Saw |
+|---|---|---|---|---|
+| 1 | Substitute | John Doe | Fake SSN (digit shifted) | Real SSN 078-05-1120 |
+| 2 | Substitute | John Doe | "Maria Garcia" + fake accounts | "John Doe" + real accounts |
+| 3 | Mixed | Jane Smith | "Maria Thompson" + `<<SSN:...>>` | "Jane Smith" + 219-09-9999 |
+| 4 | Full Tokenize | Carlos Rivera | All `<<TYPE:...>>` tokens | All real values restored |
+
+All demos run on:
+- **F5 BIG-IP VE v21.0.0.1** on AWS (m5.xlarge)
+- **Qwen 2.5 14B Instruct AWQ** on vLLM (NVIDIA L4, 24GB)
+- **MCP Server** (FastMCP + PostgreSQL) on Kubernetes (RKE2)
+- **Open WebUI** as the chat interface
+- **Context Cloak iAppLX** managing the entire configuration
