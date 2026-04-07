@@ -52,3 +52,4 @@ kubernetes/config/
 # iAppLX build artifacts
 # Keep iAppLX RPMs but exclude examples
 examples/*.rpm
+docs/~$*
