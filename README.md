@@ -164,7 +164,7 @@ Best for: fields the LLM needs to reason about naturally (names in reports, acco
 - Format: `<<TYPE:SESSION_ID:SEQUENCE>>` (e.g., `<<SSN:10.0.1.50:001>>`)
 - When enabled, a guidance prompt is injected telling the LLM to treat tokens as real values
 
-Best for: defense-in-depth with F5 AI Gateway, or fields where guardrails need to catch leaks. A guidance prompt is automatically injected to instruct the LLM to reproduce tokens verbatim. Larger models (14B+ parameters) handle this reliably; smaller models (7B) may struggle. Both modes can be mixed per-field in the same request.
+Best for: defense-in-depth with F5 AI Guardrails, or fields where guardrails need to catch leaks. A guidance prompt is automatically injected to instruct the LLM to reproduce tokens verbatim. Larger models (14B+ parameters) handle this reliably; smaller models (7B) may struggle. Both modes can be mixed per-field in the same request.
 
 ### PII Field Configuration
 
@@ -172,14 +172,14 @@ The admin tells BIG-IP which JSON fields in MCP responses contain PII. The iRule
 
 Fields can be added, removed, or have their mode changed at any time. Click **Deploy** and the iRules regenerate from the new configuration.
 
-## What's Next: F5 AI Gateway Integration
+## What's Next: F5 AI Guardrails Integration
 
-Context Cloak's tokenize mode is designed to complement **F5 AI Gateway** and guardrails solutions. The `<<SSN:session:001>>` format is intentionally distinctive -- if any token leaks through de-cloaking (because the LLM rephrased or reformatted it), a guardrails policy can catch it as a pattern match violation.
+Context Cloak's tokenize mode is designed to complement **F5 AI Guardrails** and guardrails solutions. The `<<SSN:session:001>>` format is intentionally distinctive -- if any token leaks through de-cloaking (because the LLM rephrased or reformatted it), a guardrails policy can catch it as a pattern match violation.
 
-The vision: **Context Cloak as the first layer of defense (PII never reaches the LLM), AI Gateway as the safety net (catches anything that slips through).** Defense in depth for AI data protection.
+The vision: **Context Cloak as the first layer of defense (PII never reaches the LLM), AI Guardrails as the safety net (catches anything that slips through).** Defense in depth for AI data protection.
 
 Future integration points:
-- AI Gateway policy rules that flag `<<TYPE:...>>` patterns in LLM responses
+- AI Guardrails policy rules that flag `<<TYPE:...>>` patterns in LLM responses
 - Centralized cloaking policy management across multiple BIG-IP instances
 - Telemetry and audit logging for compliance reporting
 - Auto-discovery of MCP tool schemas for PII field detection

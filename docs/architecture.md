@@ -232,13 +232,13 @@ mcp-server/
 
 All tools support **smart lookup** -- pass a name, SSN, or account number and the resolver figures out which one based on format.
 
-## Future: F5 AI Gateway Integration
+## Future: F5 AI Guardrails Integration
 
 Context Cloak's tokenize mode produces `<<TYPE:SESSION:SEQ>>` patterns designed to be caught by downstream guardrails. The integration path:
 
 1. **Context Cloak** cloaks PII at the BIG-IP layer (first defense)
-2. **F5 AI Gateway** inspects LLM responses for leaked `<<...>>` tokens (safety net)
-3. If a token leaks (LLM rephrased it, de-cloaking missed it), AI Gateway flags or blocks the response
+2. **F5 AI Guardrails** inspects LLM responses for leaked `<<...>>` tokens (safety net)
+3. If a token leaks (LLM rephrased it, de-cloaking missed it), AI Guardrails flags or blocks the response
 4. Audit logs from both layers provide compliance evidence
 
 This is **defense in depth** for AI data protection.
