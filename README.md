@@ -38,7 +38,7 @@ Context Cloak takes a different approach -- **substitute real PII with realistic
 
 The LLM sees what looks like real data and reasons about it naturally. It generates a perfect financial report for "Maria Garcia." On the way back, BIG-IP swaps the fakes back to the real values. The user sees a report about John Doe. **The LLM never knew John Doe existed.**
 
-This is conceptually a **substitution cipher** -- every real value maps to a consistent fake within the session, and the mapping is reversed transparently. Think of it like [James Veitch messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email?t=280) -- at about the 4:40 mark, he describes swapping banking terms for types of candy, and the scammer keeps negotiating without realizing they're discussing gummy bears instead of wire transfers. Same principle: swap the sensitive nouns, keep the structure, and the conversation works perfectly.
+This is conceptually a **substitution cipher** -- every real value maps to a consistent fake within the session, and the mapping is reversed transparently. Think of it like [James Veitch messing with email scammers](https://www.ted.com/talks/james_veitch_this_is_what_happens_when_you_reply_to_spam_email?t=280) -- at about the 4:40 mark, the scammer asks him to transfer 1,500 pounds to a bank account. Veitch agrees, but substitutes the word "pounds" for a code word. The scammer keeps negotiating real amounts, real urgency, real transaction details -- but the sensitive nouns have been swapped. The conversation works perfectly; the scammer doesn't notice. Same principle: the structure and the values stay intact, only the identifying terms change.
 
 ## Example Scenario
 
