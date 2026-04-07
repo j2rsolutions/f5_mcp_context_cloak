@@ -186,7 +186,7 @@ Future integration points:
 
 ## Deployment
 
-See [docs/deployment.md](docs/deployment.md) for full deployment instructions.
+See [docs/deployment.md](docs/deployment.md) for full deployment instructions and [docs/demo-evidence.md](docs/demo-evidence.md) for live demo screenshots and GIFs showing cloaking in action.
 
 ### Quick Start (Local Development)
 
