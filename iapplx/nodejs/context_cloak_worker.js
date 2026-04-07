@@ -149,7 +149,7 @@ ContextCloakWorker.prototype._deploy = function (callback) {
     commands.push('create ltm data-group internal /' + p + '/context_cloak_fields type string records add { ' + dgRecords.join(' ') + ' }');
 
     // 2. HTTP profile with rechunk
-    commands.push('create ltm profile http /' + p + '/context_cloak_http defaults-from http insert-xforwarded-for enabled response-chunking rechunk');
+    commands.push('create ltm profile http /' + p + '/context_cloak_http defaults-from http insert-xforwarded-for enabled response-chunking unchunk');
 
     // 3. Client SSL profile
     commands.push('create ltm profile client-ssl /' + p + '/context_cloak_clientssl defaults-from clientssl cert default.crt key default.key');
@@ -264,54 +264,48 @@ ContextCloakWorker.prototype._deploy = function (callback) {
     });
 };
 
-// Undeploy - remove all context_cloak objects
+// Undeploy - remove ALL context_cloak_* objects using a bash script.
+// Pattern-based, not config-derived, so it catches objects from any deploy.
 ContextCloakWorker.prototype._undeploy = function (callback) {
-    var config = this.state.config;
-    var p = config.partition || 'Common';
-    var commands = [];
+    // Write a cleanup script and execute it via bash
+    var script = '#!/bin/bash\n' +
+        'for vs in $(tmsh list ltm virtual one-line 2>/dev/null | grep context_cloak | awk "{print \\$3}"); do tmsh delete ltm virtual $vs 2>/dev/null; done\n' +
+        'for pool in $(tmsh list ltm pool one-line 2>/dev/null | grep context_cloak | awk "{print \\$3}"); do tmsh delete ltm pool $pool 2>/dev/null; done\n' +
+        'for rule in $(tmsh list ltm rule 2>/dev/null | grep "^ltm rule context_cloak" | awk "{print \\$3}"); do tmsh delete ltm rule $rule 2>/dev/null; done\n' +
+        'for prof in $(tmsh list ltm profile server-ssl one-line 2>/dev/null | grep context_cloak | awk "{print \\$4}"); do tmsh delete ltm profile server-ssl $prof 2>/dev/null; done\n' +
+        'for prof in $(tmsh list ltm profile client-ssl one-line 2>/dev/null | grep context_cloak | awk "{print \\$4}"); do tmsh delete ltm profile client-ssl $prof 2>/dev/null; done\n' +
+        'for prof in $(tmsh list ltm profile http one-line 2>/dev/null | grep context_cloak | awk "{print \\$4}"); do tmsh delete ltm profile http $prof 2>/dev/null; done\n' +
+        'for dg in $(tmsh list ltm data-group internal one-line 2>/dev/null | grep context_cloak | awk "{print \\$4}"); do tmsh delete ltm data-group internal $dg 2>/dev/null; done\n' +
+        'tmsh save sys config\n' +
+        'echo "cleanup done"\n';
 
-    // Delete in reverse dependency order
-    // Virtual servers
-    commands.push('delete ltm virtual /' + p + '/context_cloak_mcp_vs');
-    config.llm_endpoints.forEach(function (ep, idx) {
-        var name = ep.name || ('llm_' + idx);
-        commands.push('delete ltm virtual /' + p + '/context_cloak_' + name + '_vs');
-    });
-
-    // Pools
-    commands.push('delete ltm pool /' + p + '/context_cloak_mcp_pool');
-    config.llm_endpoints.forEach(function (ep, idx) {
-        var name = ep.name || ('llm_' + idx);
-        commands.push('delete ltm pool /' + p + '/context_cloak_' + name + '_pool');
-    });
-
-    // iRules
-    commands.push('delete ltm rule /' + p + '/context_cloak_mcp_irule');
-    commands.push('delete ltm rule /' + p + '/context_cloak_inference_irule');
-    commands.push('delete ltm rule /' + p + '/context_cloak_mcp_host');
-    config.llm_endpoints.forEach(function (ep, idx) {
-        var name = ep.name || ('llm_' + idx);
-        commands.push('delete ltm rule /' + p + '/context_cloak_' + name + '_host');
-    });
-
-    // Profiles
-    commands.push('delete ltm profile client-ssl /' + p + '/context_cloak_clientssl');
-    commands.push('delete ltm profile server-ssl /' + p + '/context_cloak_mcp_serverssl');
-    config.llm_endpoints.forEach(function (ep, idx) {
-        var name = ep.name || ('llm_' + idx);
-        commands.push('delete ltm profile server-ssl /' + p + '/context_cloak_' + name + '_serverssl');
-    });
-    commands.push('delete ltm profile http /' + p + '/context_cloak_http');
-
-    // Data group
-    commands.push('delete ltm data-group internal /' + p + '/context_cloak_fields');
-
-    // Save
-    commands.push('save sys config');
-
-    bigip.runTmshBatch(commands, function (err, results) {
-        logger.info('[ContextCloak] Undeploy complete');
-        callback(null, results);
+    bigip.writeFile('/var/tmp/cc_cleanup.sh', script, function (err) {
+        if (err) { logger.severe('[ContextCloak] Failed to write cleanup script: ' + err); }
+        // Execute the cleanup script via bash (not through tmsh wrapper)
+        var postData = JSON.stringify({
+            command: 'run',
+            utilCmdArgs: '-c "bash /var/tmp/cc_cleanup.sh"'
+        });
+        var http = require('http');
+        var req = http.request({
+            hostname: 'localhost', port: 8100,
+            path: '/mgmt/tm/util/bash', method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData),
+                'Authorization': 'Basic ' + Buffer.from('admin:').toString('base64')
+            }
+        }, function (res) {
+            var body = '';
+            res.on('data', function (chunk) { body += chunk; });
+            res.on('end', function () {
+                logger.info('[ContextCloak] Undeploy complete');
+                callback(null, [{ command: 'cleanup script', result: body.substring(0, 200) }]);
+            });
+        });
+        req.on('error', function (e) { callback(e, null); });
+        req.write(postData);
+        req.end();
     });
 };
 

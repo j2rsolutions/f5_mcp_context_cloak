@@ -48,7 +48,7 @@ kubernetes/overlays/*/secrets/
 kubernetes/config/
 
 # RPM packages
-*.rpm
 
 # iAppLX build artifacts
-iapplx/*.rpm
+# Keep iAppLX RPMs but exclude examples
+examples/*.rpm

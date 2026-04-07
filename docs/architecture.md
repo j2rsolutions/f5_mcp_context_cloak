@@ -81,6 +81,17 @@ Subtable: cloak_<session_id>
   _fake_list                   Maria Garcia|523-...  Index for response de-cloaking
 ```
 
+### Subtable TTL and Cache Behavior
+
+Cloaking table entries persist for the configured TTL (default 1 hour). This means:
+
+- **Changing a field's cloaking mode** (e.g., from tokenize to substitute) won't take effect for already-cached PII values until the old entries expire
+- **The same customer** will get the same fake identity within a session — this is by design for consistency
+- **To force a cache flush**, restart TMM on the BIG-IP: `bigstart restart tmm` (this drops all active connections briefly)
+- **To avoid stale entries after config changes**, either wait for TTL expiry or restart TMM
+
+A future enhancement could add a "Flush Cloaking Table" button to the iAppLX GUI.
+
 ### Session ID
 
 Both the MCP VS and Inference VS derive the session ID the same way:

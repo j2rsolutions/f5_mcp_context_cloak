@@ -271,19 +271,30 @@ function generateInferenceIrule(config) {
     lines.push('    if { $count > 0 } {');
     lines.push('        set payload [string map $map_pairs $payload]');
     if (hasTokenize) {
-        // Inject tokenize guidance: prepend system message into the messages array
-        // Look for "messages":[ and insert a system message right after the [
-        lines.push('        if { [regexp {<<[A-Z]+:} $payload] } {');
-        lines.push('            set marker {\\\"messages\\\":\\[}');
-        lines.push('            set mpos [string first $marker $payload]');
+        // Always inject tokenize guidance when tokenize mode is configured
+        // This ensures the LLM knows how to handle <<TYPE:ID:SEQ>> tokens
+        lines.push('        if { 1 } {');
+        lines.push('            log local0. ' + q('Cloak: tokenize tokens detected, injecting guidance') + '');
+        lines.push('            set mpos -1');
+        lines.push('            set mlen 0');
+        // Try multiple JSON marker formats (with/without space, escaped/unescaped)
+        lines.push('            foreach marker [list {messages\": [} {messages\":[} {messages\\\":[} {messages\\\": [}] {');
+        lines.push('                set mpos [string first $marker $payload]');
+        lines.push('                if { $mpos >= 0 } { set mlen [string length $marker]; break }');
+        lines.push('            }');
         lines.push('            if { $mpos >= 0 } {');
-        lines.push('                set insert_pos [expr {$mpos + [string length $marker]}]');
+        lines.push('                set insert_pos [expr {$mpos + $mlen}]');
         lines.push('                set sys_msg "{\\\"role\\\":\\\"system\\\",\\\"content\\\":\\\"$static::tokenize_prompt\\\"},"');
         lines.push('                set payload [string replace $payload $insert_pos [expr {$insert_pos - 1}] $sys_msg]');
-        lines.push('                log local0. ' + q('Cloak: tokenize guidance prompt injected'));
+        lines.push('                log local0. ' + q('Cloak: tokenize guidance prompt injected') + '');
+        lines.push('            } else {');
+        lines.push('                log local0. ' + q('Cloak: could not find messages array for prompt injection') + '');
         lines.push('            }');
         lines.push('        }');
     }
+        // Force non-streaming so response comes back as single payload for de-cloaking
+        lines.push('        set payload [string map {{\"stream\":true} {\"stream\":false}} $payload]');
+        lines.push('        set payload [string map {{\"stream\": true} {\"stream\": false}} $payload]');
     lines.push('        HTTP::payload replace 0 [HTTP::payload length] $payload');
     lines.push('        log local0. ' + q('Cloak: request cloaked ($count values, session=$cloak_session_id)'));
     lines.push('    }');
@@ -291,11 +302,13 @@ function generateInferenceIrule(config) {
     lines.push('}');
     lines.push('');
 
-    // Response collection
+    // Response collection (handles both Content-Length and chunked via rechunk profile)
     lines.push('when HTTP_RESPONSE {');
     lines.push('    if { !$do_cloak } { return }');
     lines.push('    if { [HTTP::header exists ' + q('Content-Length') + '] && [HTTP::header ' + q('Content-Length') + '] > 0 } {');
     lines.push('        HTTP::collect [HTTP::header ' + q('Content-Length') + ']');
+    lines.push('    } else {');
+    lines.push('        HTTP::collect 1048576');
     lines.push('    }');
     lines.push('}');
     lines.push('');
