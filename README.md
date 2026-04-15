@@ -205,6 +205,8 @@ Three layers. The user can't accidentally paste PII (guardrails catches it). The
 
 See [docs/deployment.md](docs/deployment.md) for full deployment instructions and [docs/demo-evidence.md](docs/demo-evidence.md) for live demo screenshots and GIFs showing cloaking in action.
 
+**Part 2 (Guardrails Mode):** See [docs/guardrails-integration.md](docs/guardrails-integration.md) for the F5 AI Guardrails integration — closing the first-prompt gap with inbound PII detection plus a tokenize-only cloaking mode, with an honest section on what the system does *not* protect (quasi-identifiers, trajectories). Policy, K8s manifests, and reference stub under [`guardrails/`](guardrails/). Demo evidence in [docs/guardrails-demo-evidence.md](docs/guardrails-demo-evidence.md).
+
 ### Quick Start (Local Development)
 
 ```bash

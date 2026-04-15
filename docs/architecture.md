@@ -232,13 +232,54 @@ mcp-server/
 
 All tools support **smart lookup** -- pass a name, SSN, or account number and the resolver figures out which one based on format.
 
-## Future: F5 AI Guardrails Integration
+## Guardrails Mode (F5 AI Guardrails Integration)
 
-Context Cloak's tokenize mode produces `<<TYPE:SESSION:SEQ>>` patterns designed to be caught by downstream guardrails. The integration path:
+Context Cloak ships with an optional **Guardrails Mode** that inserts F5 AI Guardrails between the Inference VS and vLLM. This closes the "first prompt" gap that cloaking alone cannot cover — PII the analyst types directly before any MCP lookup has populated the cloaking table.
 
-1. **Context Cloak** cloaks PII at the BIG-IP layer (first defense)
-2. **F5 AI Guardrails** inspects LLM responses for leaked `<<...>>` tokens (safety net)
-3. If a token leaks (LLM rephrased it, de-cloaking missed it), AI Guardrails flags or blocks the response
-4. Audit logs from both layers provide compliance evidence
+### Topology in Guardrails Mode
 
-This is **defense in depth** for AI data protection.
+```
+Open WebUI
+    │ POST /v1/chat/completions
+    ▼
+BIG-IP Inference VS            (1) real -> token substitution
+    │                              (pre-existing cloak table only)
+    ▼
+F5 AI Guardrails  (k8s)         (2) inspect last user message
+    │                              block on raw PII patterns
+    │                              redact leaked <<TYPE:ID:SEQ>>
+    ▼
+vLLM (Qwen)                    (3) sees only tokens
+```
+
+The BIG-IP Inference VS pool member address is the Guardrails K8s Service (`ai-guardrails.guardrails.svc.cluster.local:8000`). Guardrails forwards cleared requests to the upstream vLLM service defined in its policy.
+
+### Why tokenize, not substitute, in Guardrails Mode
+
+Substitution produces realistic fakes (fake SSN `523-50-6675`, fake account `7865-4412-3375`). Those values still match Guardrails' PII regex patterns — Guardrails would block the cloaked request. Tokenization emits `<<SSN:10.0.1.50:001>>`, which does not match any PII pattern and passes through cleanly.
+
+When Guardrails Mode is enabled in the iAppLX UI:
+
+1. The worker's `normalizeConfigForDeploy` force-rewrites every non-disabled `pii_fields[].cloak_mode` to `tokenize` before the data group is built.
+2. The iRule generator's `hasTokenize` branch is forced on, so the tokenize guidance system prompt is always injected into the messages array.
+3. Per-field mode selectors in the UI are locked and visually disabled; a banner explains why.
+
+The original config on disk is not mutated — users can toggle Guardrails Mode off and their per-field modes are intact.
+
+### What each layer protects
+
+| Layer | Protects against | Does not protect |
+|---|---|---|
+| **BIG-IP Inference VS (cloaking)** | Backend-sourced PII (MCP responses): SSN, account #, phone, email, full name | User-typed PII in the first prompt (no mapping yet) |
+| **F5 AI Guardrails (inbound)** | User-typed high-sensitivity PII: SSN, account #, phone, email, credit card | Names (required as lookup keys); transaction amounts; dates |
+| **F5 AI Guardrails (outbound)** | Leaked `<<TYPE:ID:SEQ>>` tokens (de-cloak mismatch or LLM hallucination) | Semantic leakage of tokenized content |
+
+See [`docs/guardrails-integration.md`](guardrails-integration.md) for the full deployment guide, threat model, and an honest list of what Context Cloak does not protect (quasi-identifiers, trajectories, time series).
+
+### The three-layer defense
+
+1. **Guardrails (inbound)** — the user can't accidentally paste regulated PII
+2. **BIG-IP cloaking** — backend-sourced PII is tokenized before reaching the LLM
+3. **Guardrails (outbound)** — any leaked token is redacted before the analyst sees it
+
+Each layer compensates for what the others can't see.
