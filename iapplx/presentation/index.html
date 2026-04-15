@@ -34,11 +34,47 @@
         .add-btn { color: #00d4ff; background: none; border: 1px dashed #00d4ff; padding: 8px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 10px; }
         .actions { margin-top: 25px; display: flex; gap: 10px; }
         .note { color: #666; font-size: 12px; font-style: italic; margin-top: 4px; }
+        .toggle-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .toggle-row input[type="checkbox"] { width: auto; margin: 0; }
+        .toggle-label { color: #e0e0e0; font-size: 14px; font-weight: 600; margin: 0; }
+        .banner { background: #0f3460; border-left: 3px solid #00d4ff; padding: 10px 14px; margin: 10px 0; font-size: 13px; color: #cfe9ff; border-radius: 2px; }
+        .banner-warn { background: #3a2f1a; border-left-color: #f39c12; color: #ffe1a8; }
+        .banner-danger { background: #3a1f1f; border-left-color: #ff4757; color: #ffb3b3; }
+        .field-disabled select, .field-disabled input { opacity: 0.5; pointer-events: none; }
+        textarea { width: 100%; padding: 8px 12px; background: #0f3460; border: 1px solid #444; border-radius: 4px; color: #e0e0e0; font-size: 13px; margin-bottom: 12px; font-family: inherit; resize: vertical; min-height: 70px; }
+        textarea:focus { outline: none; border-color: #00d4ff; }
     </style>
 </head>
 <body>
     <h1>Context Cloak</h1>
     <p class="subtitle">Privacy-preserving PII cloaking for MCP-assisted LLM workflows</p>
+
+    <!-- Operating Mode -->
+    <h2>Operating Mode</h2>
+    <div class="card">
+        <div class="toggle-row">
+            <input type="checkbox" id="guardrails-enabled" onchange="onGuardrailsToggle()">
+            <label for="guardrails-enabled" class="toggle-label">Guardrails Mode</label>
+        </div>
+        <p class="note">When enabled, Context Cloak assumes F5 AI Guardrails sits between the Inference VS and the LLM with PII detection active. All PII fields are forced to <strong>tokenize</strong> mode (substitution disabled) so cloaked values don't trip Guardrails PII patterns. The tokenize guidance prompt is always injected.</p>
+        <div id="guardrails-config" style="display:none; margin-top:12px;">
+            <div class="row">
+                <div>
+                    <label>Guardrails Endpoint (K8s service URL)</label>
+                    <input type="text" id="guardrails-endpoint" placeholder="http://ai-guardrails.guardrails.svc.cluster.local:8000">
+                </div>
+                <div>
+                    <label>Policy Name</label>
+                    <input type="text" id="guardrails-policy" placeholder="context-cloak-default">
+                </div>
+            </div>
+            <label>Block Message (shown to analyst when raw PII is detected in prompt)</label>
+            <textarea id="guardrails-block-message">It looks like your request includes sensitive information (e.g. SSN, account number, or phone number). Please rephrase using a customer name or ID instead. The system will securely retrieve protected fields on your behalf.</textarea>
+            <div class="banner banner-warn">
+                <strong>Wiring:</strong> This endpoint is for reference only. The Inference VS forwards to Guardrails by pointing its pool member at the Guardrails service; Guardrails then forwards cleared requests to vLLM. Configure pool members on the LLM Endpoint card accordingly.
+            </div>
+        </div>
+    </div>
 
     <div id="status-bar" class="card" style="display:flex; justify-content:space-between; align-items:center;">
         <div>
@@ -121,8 +157,11 @@
 
     <!-- PII Fields -->
     <h2>PII Field Configuration</h2>
-    <div class="card">
+    <div class="card" id="pii-fields-card">
         <p class="note">Define which JSON fields in MCP responses contain PII and how to cloak them.</p>
+        <div id="guardrails-pii-banner" class="banner banner-warn" style="display:none;">
+            <strong>Guardrails Mode active:</strong> per-field mode is locked to <em>Tokenize</em>. Substitution is disabled because realistic fakes (e.g. fake SSNs, fake account numbers) would be blocked by Guardrails PII detection. Tokens (<code>&lt;&lt;TYPE:ID:SEQ&gt;&gt;</code>) pass through Guardrails cleanly and are reversed by the Inference VS.
+        </div>
         <table>
             <thead>
                 <tr>
@@ -174,6 +213,13 @@
         <button class="add-btn" onclick="addPiiField()">+ Add PII Field</button>
     </div>
 
+    <!-- Tokenize Guidance Prompt -->
+    <h2>Tokenize Guidance Prompt</h2>
+    <div class="card">
+        <p class="note">System prompt injected when tokenization is in effect. Instructs the LLM to preserve <code>&lt;&lt;TYPE:ID:SEQ&gt;&gt;</code> tokens verbatim. Always injected in Guardrails Mode; otherwise injected whenever any field is set to Tokenize.</p>
+        <textarea id="tokenize-prompt" style="min-height:120px;"></textarea>
+    </div>
+
     <!-- Session Config -->
     <h2>Session Configuration</h2>
     <div class="card">
@@ -204,6 +250,39 @@
 
     <script>
         var BASE = '/mgmt/shared/context-cloak';
+        var DEFAULT_TOKENIZE_PROMPT = 'You may encounter placeholders in the format <<TYPE:ID:SEQ>> in the data you receive. These are privacy tokens representing sensitive information that has been secured. Treat these placeholders as if they were real values. Reference them naturally in your response exactly as they appear. They will be automatically replaced with the actual values before the user sees your response. Do not mention that the data is tokenized or masked.';
+
+        function onGuardrailsToggle() {
+            var enabled = document.getElementById('guardrails-enabled').checked;
+            document.getElementById('guardrails-config').style.display = enabled ? 'block' : 'none';
+            document.getElementById('guardrails-pii-banner').style.display = enabled ? 'block' : 'none';
+            // Lock per-field cloak mode selectors to "tokenize" when enabled
+            document.querySelectorAll('#pii-fields tr').forEach(function (tr) {
+                applyGuardrailsLockToRow(tr, enabled);
+            });
+        }
+
+        function applyGuardrailsLockToRow(tr, locked) {
+            var selects = tr.querySelectorAll('select');
+            if (!selects || selects.length === 0) return;
+            var modeSel = selects[0];
+            if (locked) {
+                // Force tokenize, disable the selector
+                for (var i = 0; i < modeSel.options.length; i++) {
+                    if (modeSel.options[i].value === 'tokenize') { modeSel.selectedIndex = i; break; }
+                }
+                modeSel.disabled = true;
+                tr.classList.add('field-disabled');
+                // Only the mode selector is visually locked; the label/type column stays editable
+                var modeTd = modeSel.parentElement;
+                if (modeTd) { modeTd.classList.add('field-disabled'); }
+            } else {
+                modeSel.disabled = false;
+                tr.classList.remove('field-disabled');
+                var modeTd = modeSel.parentElement;
+                if (modeTd) { modeTd.classList.remove('field-disabled'); }
+            }
+        }
 
         function addPiiField() {
             var tbody = document.getElementById('pii-fields');
@@ -214,6 +293,10 @@
                 '<td><select><option value="name">Name Pool</option><option value="digit_shift">Digit Shift</option><option value="email">Email</option><option value="phone">Phone</option></select></td>' +
                 '<td><button class="remove-btn" onclick="this.closest(\'tr\').remove()">x</button></td>';
             tbody.appendChild(tr);
+            // Apply Guardrails lock if currently enabled
+            if (document.getElementById('guardrails-enabled').checked) {
+                applyGuardrailsLockToRow(tr, true);
+            }
         }
 
         function addLlmEndpoint() {
@@ -264,6 +347,9 @@
                 });
             });
 
+            var tokenizePromptEl = document.getElementById('tokenize-prompt');
+            var tokenizePrompt = (tokenizePromptEl && tokenizePromptEl.value) ? tokenizePromptEl.value : DEFAULT_TOKENIZE_PROMPT;
+
             return {
                 mcp: {
                     vs_ip: document.getElementById('mcp-vs-ip').value,
@@ -285,6 +371,13 @@
                 fake_names: {
                     first: ["Alice","Maria","David","Sarah","James","Emily","Michael","Lisa","Robert","Jennifer"],
                     last: ["Johnson","Garcia","Wilson","Thompson","Anderson","Martinez","Brown","Davis","Taylor","Moore"]
+                },
+                tokenize_prompt: tokenizePrompt,
+                guardrails: {
+                    enabled: document.getElementById('guardrails-enabled').checked,
+                    endpoint_url: document.getElementById('guardrails-endpoint').value,
+                    policy_name: document.getElementById('guardrails-policy').value,
+                    block_message: document.getElementById('guardrails-block-message').value
                 },
                 partition: "Common"
             };
@@ -350,13 +443,31 @@
                             document.getElementById('mcp-pool-port').value = c.mcp.pool_members[0].port || 443;
                         }
                     }
+                    // Tokenize prompt
+                    document.getElementById('tokenize-prompt').value = c.tokenize_prompt || DEFAULT_TOKENIZE_PROMPT;
+                    // Guardrails
+                    var gr = c.guardrails || {};
+                    document.getElementById('guardrails-enabled').checked = !!gr.enabled;
+                    document.getElementById('guardrails-endpoint').value = gr.endpoint_url || '';
+                    document.getElementById('guardrails-policy').value = gr.policy_name || '';
+                    if (gr.block_message) {
+                        document.getElementById('guardrails-block-message').value = gr.block_message;
+                    }
+                    onGuardrailsToggle();
+                } else {
+                    // Initial load with no saved config - populate defaults
+                    document.getElementById('tokenize-prompt').value = DEFAULT_TOKENIZE_PROMPT;
                 }
             });
             loadStatus();
         }
 
+        // Set defaults immediately (so fields are populated even before fetch resolves)
+        document.getElementById('tokenize-prompt').value = DEFAULT_TOKENIZE_PROMPT;
+
         // Load on page open
         loadStatus();
+        loadConfig();
     </script>
 </body>
 </html>

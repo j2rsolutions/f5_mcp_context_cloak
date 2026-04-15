@@ -59,11 +59,43 @@ function getDefaultState() {
                 last:  ['Johnson','Garcia','Wilson','Thompson','Anderson','Martinez','Brown','Davis','Taylor','Moore']
             },
             tokenize_prompt: 'You may encounter placeholders in the format <<TYPE:ID:SEQ>> in the data you receive. These are privacy tokens representing sensitive information that has been secured. Treat these placeholders as if they were real values. Reference them naturally in your response exactly as they appear. They will be automatically replaced with the actual values before the user sees your response. Do not mention that the data is tokenized or masked.',
+            guardrails: {
+                enabled: false,
+                endpoint_url: '',
+                policy_name: '',
+                block_message: 'It looks like your request includes sensitive information (e.g. SSN, account number, or phone number). Please rephrase using a customer name or ID instead. The system will securely retrieve protected fields on your behalf.'
+            },
             partition: 'Common'
         },
         deployed: false,
         deploy_timestamp: null
     };
+}
+
+/**
+ * Return a deploy-ready copy of the config. When Guardrails Mode is enabled,
+ * every non-disabled PII field is forced to tokenize so cloaked values don't
+ * trip upstream Guardrails PII detection. The original config on disk is not
+ * mutated -- the UI still shows per-field modes, but deploy uses normalized.
+ */
+function normalizeConfigForDeploy(config) {
+    var cloned = JSON.parse(JSON.stringify(config || {}));
+    var gr = cloned.guardrails || { enabled: false };
+    if (gr.enabled) {
+        (cloned.pii_fields || []).forEach(function (f) {
+            if (f.cloak_mode === 'disabled') return;
+            f.cloak_mode = 'tokenize';
+            // Preserve a sensible token label if one isn't set
+            if (!f.token_label) {
+                if (f.substitute_type === 'name') f.token_label = 'NAME';
+                else if (f.substitute_type === 'email') f.token_label = 'EMAIL';
+                else if (f.substitute_type === 'phone') f.token_label = 'PHONE';
+                else if (f.substitute_type === 'digit_shift') f.token_label = 'NUM';
+                else f.token_label = (f.field_name || 'FIELD').toUpperCase();
+            }
+        });
+    }
+    return cloned;
 }
 
 // GET handler
@@ -129,11 +161,15 @@ ContextCloakWorker.prototype.onPost = function (restOperation) {
 
 // Deploy
 ContextCloakWorker.prototype._deploy = function (callback) {
-    var config = this.state.config;
+    var config = normalizeConfigForDeploy(this.state.config);
     var p = config.partition || 'Common';
     var commands = [];
 
-    logger.info('[ContextCloak] Deploying...');
+    if (config.guardrails && config.guardrails.enabled) {
+        logger.info('[ContextCloak] Deploying in Guardrails Mode (all fields tokenized)');
+    } else {
+        logger.info('[ContextCloak] Deploying...');
+    }
 
     // 1. Data group for PII fields
     var dgRecords = [];

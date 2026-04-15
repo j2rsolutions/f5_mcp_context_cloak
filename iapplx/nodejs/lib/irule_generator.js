@@ -44,7 +44,14 @@ function generateMcpIrule(config) {
     var dgName = '/' + p + '/context_cloak_fields';
     var firsts = config.fake_names.first.join(' ');
     var lasts = config.fake_names.last.join(' ');
+    var guardrailsEnabled = !!(config.guardrails && config.guardrails.enabled);
     var lines = [];
+
+    if (guardrailsEnabled) {
+        lines.push('# Context Cloak: Guardrails Mode ENABLED');
+        lines.push('# Extraction still runs; data group contains only tokenize-mode entries.');
+        lines.push('');
+    }
 
     lines.push('when RULE_INIT {');
     lines.push('    set static::cloak_ttl ' + ttl);
@@ -194,9 +201,19 @@ function generateMcpIrule(config) {
 
 function generateInferenceIrule(config) {
     var prefix = 'cloak_';
-    var hasTokenize = config.pii_fields.some(function(f) { return f.cloak_mode === 'tokenize'; });
+    var guardrailsEnabled = !!(config.guardrails && config.guardrails.enabled);
+    // Tokenize prompt is injected if any field uses tokenize mode OR if Guardrails
+    // Mode is enabled (in which case all fields are tokenized by normalizeConfigForDeploy).
+    var hasTokenize = guardrailsEnabled || config.pii_fields.some(function(f) { return f.cloak_mode === 'tokenize'; });
     var tokenizePrompt = config.tokenize_prompt || 'You may encounter placeholders in the format <<TYPE:ID:SEQ>> in the data you receive. These are privacy tokens representing sensitive information that has been secured. Treat these placeholders as if they were real values. Reference them naturally in your response exactly as they appear. They will be automatically replaced with the actual values before the user sees your response. Do not mention that the data is tokenized or masked.';
     var lines = [];
+
+    if (guardrailsEnabled) {
+        lines.push('# Context Cloak: Guardrails Mode ENABLED');
+        lines.push('# All PII fields forced to tokenize -- cloaked values must not match');
+        lines.push('# Guardrails PII detection patterns (which fake SSNs/accounts would).');
+        lines.push('');
+    }
 
     lines.push('when RULE_INIT {');
     lines.push('    set static::cloak_prefix ' + q(prefix));
