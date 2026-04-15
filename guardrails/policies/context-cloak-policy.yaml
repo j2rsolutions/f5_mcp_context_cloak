@@ -1,0 +1,102 @@
+# =======================================================================
+# Context Cloak reference policy for F5 AI Guardrails
+# =======================================================================
+# This file is the canonical policy source. The K8s ConfigMap in
+# kubernetes/base/guardrails/configmap-policy.yaml embeds the same
+# content -- keep them in sync when editing.
+#
+# Consumable by:
+#   - F5 AI Guardrails (adapt key names to product schema as needed)
+#   - The reference stub under guardrails/stub/
+#
+# Threat model assumptions:
+#   - Analyst queries customer records via MCP (Open WebUI -> BIG-IP
+#     MCP VS -> MCP server).
+#   - BIG-IP builds a session cloaking table from MCP responses,
+#     tokenizing high-sensitivity fields in Guardrails Mode.
+#   - Inference traffic: Open WebUI -> BIG-IP Inference VS -> F5 AI
+#     Guardrails -> vLLM. Guardrails is the trust boundary for
+#     user-typed content, cloaking handles backend-sourced data.
+#
+# What this policy protects:
+#   - Raw SSN, account, credit-card, phone, email pasted into prompts.
+#   - Leaked Context Cloak tokens that slipped past de-cloaking.
+#
+# What this policy does NOT protect (see docs/guardrails-integration.md):
+#   - Customer names (required as lookup keys).
+#   - Transaction amounts, dates, merchant names (quasi-identifiers).
+#   - Trajectories, time series, free-text PII.
+# =======================================================================
+
+policy:
+  name: context-cloak-default
+  version: 1
+
+  # Upstream target -- Guardrails forwards cleared requests here.
+  # In the Context Cloak topology this is vLLM directly.
+  upstream:
+    url: http://vllm.inference.svc.cluster.local:8000
+
+  # -----------------------------------------------------------------
+  # Inbound rules -- inspected against the last user message.
+  # Action "block" returns the block_response below and stops forwarding.
+  # Names and customer IDs are intentionally allowed.
+  # -----------------------------------------------------------------
+  inbound:
+    - id: ssn
+      description: "US Social Security Number"
+      action: block
+      pattern: '\b\d{3}-\d{2}-\d{4}\b'
+
+    - id: ssn-no-dashes
+      description: "SSN without dashes (9 consecutive digits)"
+      action: block
+      pattern: '(?<!\d)\d{9}(?!\d)'
+
+    - id: credit-card
+      description: "Credit card (13-19 digits, optional separators)"
+      action: block
+      pattern: '\b(?:\d[ -]*?){13,19}\b'
+
+    - id: account-dashed
+      description: "Dashed account number (4-4-4 pattern used in this demo)"
+      action: block
+      pattern: '\b\d{4}-\d{4}-\d{4}\b'
+
+    - id: phone-us
+      description: "US phone number"
+      action: block
+      pattern: '\b(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b'
+
+    - id: email
+      description: "Email address"
+      action: block
+      pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+
+  # -----------------------------------------------------------------
+  # Outbound rules -- safety net for leaked cloak tokens.
+  # If any <<TYPE:ID:SEQ>> reaches this layer it means the de-cloak
+  # in the Inference VS failed for that value (LLM hallucinated a
+  # token not in the mapping, or mapping was evicted). Redact so
+  # the analyst never sees a naked token, and surface the event.
+  # -----------------------------------------------------------------
+  outbound:
+    - id: leaked-cloak-token
+      description: "Context Cloak privacy token that was not reversed"
+      action: redact
+      replacement: "[REDACTED]"
+      pattern: '<<[A-Z_]+:[^>]+:\d{3}>>'
+
+  # -----------------------------------------------------------------
+  # Block response -- OpenAI-compatible so Open WebUI renders the
+  # message as an assistant reply. Text mirrors the iAppLX UI's
+  # block_message field; keep both in sync.
+  # -----------------------------------------------------------------
+  block_response:
+    status: 200
+    format: openai_chat_completion
+    message: |
+      It looks like your request includes sensitive information
+      (e.g. SSN, account number, or phone number). Please rephrase
+      using a customer name or ID instead. The system will securely
+      retrieve protected fields on your behalf.

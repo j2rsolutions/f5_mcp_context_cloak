@@ -21,5 +21,14 @@ resources:
   # Network Policies
   - network-policies.yaml
 
+# ---------------------------------------------------------------
+# Optional: F5 AI Guardrails (Part 2 / Guardrails Mode)
+# ---------------------------------------------------------------
+# The guardrails component lives in its own namespace and ships a
+# reference stub for demo reproducibility. Deploy independently:
+#   kubectl apply -k kubernetes/base/guardrails
+# Do NOT add it to the resources list above -- it uses a different
+# namespace than the rest of this kustomization.
+
 commonLabels:
   app.kubernetes.io/part-of: context-cloak

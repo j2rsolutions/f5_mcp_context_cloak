@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: guardrails
+  labels:
+    app.kubernetes.io/part-of: context-cloak
+    app.kubernetes.io/component: guardrails

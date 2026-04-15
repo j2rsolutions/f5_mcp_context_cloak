@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardrails-policy
+  namespace: guardrails
+  labels:
+    app: ai-guardrails
+data:
+  # Context Cloak reference policy for F5 AI Guardrails.
+  # Consumable by the real F5 AI Guardrails product (adapt key names as needed
+  # to match product schema) or by the reference stub under guardrails/stub/.
+  policy.yaml: |
+    policy:
+      name: context-cloak-default
+      version: 1
+      # Upstream target -- where cleared requests are forwarded.
+      # In the Context Cloak topology this is the vLLM service, not BIG-IP:
+      # the BIG-IP Inference VS points at Guardrails, Guardrails forwards to vLLM.
+      upstream:
+        url: http://vllm.inference.svc.cluster.local:8000
+
+      # ================================================================
+      # Inbound (analyst -> LLM) rules
+      # ================================================================
+      # Inspect the last user message content. If any high-sensitivity
+      # pattern matches, block with the analyst guidance message.
+      # Names are NOT blocked -- they're the required lookup key.
+      # Transaction amounts and dates are NOT blocked -- quasi-identifiers
+      # out of scope (see docs/guardrails-integration.md "What we don't protect").
+      inbound:
+        - id: ssn
+          description: "US Social Security Number"
+          action: block
+          pattern: '\b\d{3}-\d{2}-\d{4}\b'
+        - id: ssn-no-dashes
+          description: "SSN without dashes (9 consecutive digits)"
+          action: block
+          # 9 digits not preceded/followed by other digits
+          pattern: '(?<!\d)\d{9}(?!\d)'
+        - id: credit-card
+          description: "Credit card (13-19 digits, optional separators)"
+          action: block
+          pattern: '\b(?:\d[ -]*?){13,19}\b'
+        - id: account-dashed
+          description: "Dashed account number (4-4-4 pattern used in this demo)"
+          action: block
+          pattern: '\b\d{4}-\d{4}-\d{4}\b'
+        - id: phone-us
+          description: "US phone number"
+          action: block
+          pattern: '\b(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b'
+        - id: email
+          description: "Email address"
+          action: block
+          pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+
+      # ================================================================
+      # Outbound (LLM -> analyst) rules
+      # ================================================================
+      # Safety net: if any Context Cloak token leaks through de-cloaking
+      # (LLM hallucinated a token that wasn't in the mapping table),
+      # catch it here and redact. This stops fake tokens from being shown
+      # to the analyst and flags a decloak mismatch for investigation.
+      outbound:
+        - id: leaked-cloak-token
+          description: "Context Cloak privacy token that was not reversed"
+          action: redact
+          replacement: "[REDACTED]"
+          # Matches <<TYPE:ID:SEQ>> -- same format emitted by the MCP iRule
+          pattern: '<<[A-Z_]+:[^>]+:\d{3}>>'
+
+      # ================================================================
+      # Block response
+      # ================================================================
+      # Returned to the analyst in OpenAI-compatible shape so Open WebUI
+      # renders it as an assistant reply. Message text is also surfaced
+      # in the iAppLX config so both layers agree.
+      block_response:
+        status: 200
+        format: openai_chat_completion
+        message: |
+          It looks like your request includes sensitive information
+          (e.g. SSN, account number, or phone number). Please rephrase
+          using a customer name or ID instead. The system will securely
+          retrieve protected fields on your behalf.

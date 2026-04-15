@@ -1,0 +1,76 @@
+# ============================================================
+# REFERENCE STUB for F5 AI Guardrails
+# ============================================================
+# This Deployment is a minimal stand-in that implements the
+# same HTTP contract (OpenAI-compatible proxy) as F5 AI Guardrails,
+# enforcing the reference policy in configmap-policy.yaml.
+#
+# It exists so the Context Cloak demo is reproducible end-to-end
+# without a licensed F5 AI Guardrails instance. In production,
+# replace this Deployment with the real product, keep the Service
+# name (ai-guardrails) and port (8000), and mount the same
+# policy ConfigMap.
+#
+# Source: guardrails/stub/ in this repo.
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-guardrails
+  namespace: guardrails
+  labels:
+    app: ai-guardrails
+    component: stub
+  annotations:
+    context-cloak.f5.com/note: "Reference stub - replace with F5 AI Guardrails in production"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-guardrails
+  template:
+    metadata:
+      labels:
+        app: ai-guardrails
+        component: stub
+    spec:
+      containers:
+        - name: guardrails
+          # Build from guardrails/stub/Dockerfile or use the published image.
+          image: ghcr.io/j2rsolutions/context-cloak-guardrails-stub:0.3.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: POLICY_PATH
+              value: /policy/policy.yaml
+            - name: UPSTREAM_URL
+              value: http://vllm.inference.svc.cluster.local:8000
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+      volumes:
+        - name: policy
+          configMap:
+            name: guardrails-policy

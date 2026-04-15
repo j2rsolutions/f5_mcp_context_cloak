@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ============================================================
+# Context Cloak -- Guardrails component (optional)
+# ============================================================
+# Included automatically by ../kustomization.yaml. Ships with a
+# reference stub (see stub-deployment.yaml). To run against the
+# real F5 AI Guardrails product, replace stub-deployment.yaml with
+# the product's Deployment/StatefulSet and keep the Service + policy
+# ConfigMap as-is. The BIG-IP Inference VS pool member should
+# resolve to the ai-guardrails.guardrails.svc.cluster.local:8000
+# endpoint either way.
+
+namespace: guardrails
+
+resources:
+  - namespace.yaml
+  - configmap-policy.yaml
+  - service.yaml
+  - stub-deployment.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: context-cloak
+  app.kubernetes.io/component: guardrails
