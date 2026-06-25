@@ -53,3 +53,79 @@ kubernetes/config/
 # Keep iAppLX RPMs but exclude examples
 examples/*.rpm
 docs/~$*
+# ---- added for GitHub migration (auto) ----
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+
+# Finder duplicate files
+*\ (1).*
+*\ (2).*
+*\ copy.*
+*\ copy\ *.*
+
+# Secrets / keys / certs — NEVER commit (copy manually)
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.ppk
+*.der
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+.env
+*.env
+!.env.example
+!.env.sample
+!*.env.example
+credentials
+secrets/
+keys/
+certs/
+
+# Terraform state & provider caches (huge / contain secrets)
+**/.terraform/*
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Dependency / build caches
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+.next/
+dist/
+build/
+.cache/
+
+# Large binaries / archives / images
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.iso
+*.qcow2
+*.vmdk
+*.ova
+*.dmg
+*.gz
+*.7z
+*.rar
+*.bin
+*.pt
+*.ckpt
+*.safetensors
+*.h5
+*.mp4
+*.mov
